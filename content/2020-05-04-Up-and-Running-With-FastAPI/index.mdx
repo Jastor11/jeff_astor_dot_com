@@ -1,0 +1,349 @@
+---
+title: "Up and Running With FastAPI and Docker"
+category: "Python"
+date: 2020-05-04
+published: "true"
+slug: "up-and-running-with-fastapi-and-docker"
+series: up-and-running-with-fastapi
+tags:
+    - python
+    - fastapi
+    - server
+    - docker
+---
+import { FastAPISeriesList } from "src/components"
+
+It's May 2020 and we all have a lot of extra indoor time. I've hunkered down and learned a few new technologies and frameworks. I'd like to share my favorite one with you here - the FastAPI framework.
+
+Though I'd heard good things about FastAPI for a while, I never had a chance to dig in. Now that I have, I must admit I've been pleasantly surprised with the developer experience. I've also been fortunate enough to integrate it into my professional work and our team has enjoyed the benefits as well.
+
+This series of posts is going to walk through the things I've learned composing my first few FastAPI backends.
+
+<FastAPISeriesList upTo={1} />
+
+Part 1 is here and will focus on developing the skeleton and basic plumbing needed to get any project idea started.
+
+Just for fun, we'll build the backend for a crowd-sourced cleaning marketplace called Phresh. Users can schedule cleanings, others can select jobs to take up and get paid for their work.
+
+## Environment and Setup
+
+Never heard of Docker before? This might be a wild ride for you. See my article on [Just Enough Docker To Get By](/blog/just-enough-docker-to-get-by), and then come back here.
+
+Already up to speed? Great. Make sure Docker desktop is running.
+
+We're going to structure our application like so:
+
+```bash
+|-- backend
+|   |-- app
+|       |-- api
+|       |-- core
+|       |-- db
+|       |-- emails
+|       |-- models
+|       |-- services
+|       |-- utils
+|   |-- tests
+|       |-- conftest.py
+|   |-- .env
+|   |-- Dockerfile
+|   |-- requirements.txt
+|-- .flake8
+|-- .gitignore
+|-- docker-compose.yml
+|-- README.md
+```
+
+I'm sure you can handle this on your own, but for consistency, here's the commands you'll run to setup most of that structure:
+
+```bash
+mkdir phresh
+cd phresh
+mkdir backend
+mkdir backend/app backend/tests
+mkdir backend/app/api backend/app/core
+touch .flake8 .gitignore docker-compose.yml README.md
+touch backend/.env backend/Dockerfile backend/requirements.txt
+```
+
+Everything look ok so far? We're about to add some dependencies, spin up a quick and dirty server, and run Docker - so grab a cup of coffee and prepare yourself.
+
+### Install packages
+
+This app will use quite a few packages by the time we're done with it, but we only need a few to get up and running for the time being.
+
+Don't worry about installing anything - Docker will handle that for us!
+
+Head into your `requirements.txt` and update it with the following code:
+
+```text:title=<span>requirements.txt</span>
+# app
+fastapi==0.55.1
+uvicorn==0.11.3
+pydantic==1.4
+email-validator==1.1.1
+
+```
+
+Not too bad. We'll add more in a minute, but for now only four packages:
++ **fastapi** - the framework we're using to build this backend
++ **uvicorn** - the ASGI server we'll use to serve up our app
++ **pydantic** - validation library baked into fastapi that we'll use to handle data models at different stages throughout our application
++ **email-validator** - allows pydantic to validate emails
+
+### Create a server
+
+Ok. Finally time for a little python. Only a little though.
+
+Create a file called `server.py` inside the api directory, along with an `__init__.py` file.
+
+```bash
+touch backend/app/api/__init__.py backend/app/api/server.py
+```
+
+Inside `server.py`, add the following:
+
+```python:title=<span>server.py</span>
+from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
+
+
+def get_application():
+    app = FastAPI(title="Phresh", version="1.0.0")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    return app
+
+
+app = get_application()
+
+```
+
+A few interesting things going on here. We have a factory function that returns a FastAPI app with cors middleware configured. Don't worry too much about the cors stuff - this is a rabbit hole that I don't feel like diving into at the moment. If you want to read more, MDN has some great docs on it.
+
+You'll also notice we're importing this middleware from the `starlette` package. FastAPI is built on top of starlette, and we'll occasionally dip into the underlying architecture to accomplish a few things. Just a heads up. You don't need to worry too much about this either, but feel free to checkout the docs [here](https://www.starlette.io/) if you want to learn more.
+
+The developers behind FastAPI have been hard at work trying to create an interface over most of the Starlette architecture, so it's actually possible to import this directly from fastapi now.
+
+```python:title=<span>server.py</span>
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+
+def get_application():
+    app = FastAPI(title="Phresh", version="1.0.0")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    return app
+
+
+app = get_application()
+
+```
+
+### Spin up a docker container
+
+That was fun. Now let's do a little docker handywork.
+
+In your `Dockerfile`, add the following code. No need to understand this all yet either - we'll dive into the specifics later on.
+
+```bash:title=<span>Dockerfile</span>
+FROM python:3.8.1-alpine
+
+WORKDIR /backend
+
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONBUFFERED 1
+
+COPY ./requirements.txt /backend/requirements.txt
+
+RUN set -eux \
+  && apk add --no-cache --virtual .build-deps build-base \
+     libressl-dev libffi-dev gcc musl-dev python3-dev \
+     libc-dev libxslt-dev libxml2-dev bash \
+     postgresql-dev \
+  && pip install --upgrade pip setuptools wheel \
+  && pip install -r /backend/requirements.txt \
+  && rm -rf /root/.cache/pip
+
+COPY . /backend
+
+```
+
+We pull the official Alpine docker image for python 3.8.1, set the working directory, and add environment variables to prevent python from writing pyc files to disc and from buffering stdout and stderr.
+
+Then, we copy over the `requirements.txt` file, install the necessary dependencies, and copy our app into the backend folder.
+
+Like I said - not a big deal if you're not up to speed with many of the commands here. It's not our focus, though we will dissect it in more detail in a future post.
+
+In your `docker-compose.yml` file, add the following:
+
+```yml:title=<span>docker-compose.yml</span>
+version: '3.7'
+
+services:
+  server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend/:/backend/
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: uvicorn app.api.server:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    env_file:
+      - ./backend/.env
+    ports:
+      - 8000:8000
+
+```
+
+A few things going on here
++ We're setting up our first service - server - and telling it to build using the Dockerfile we just defined. 
++ We're saving the docker socket and backend files to volume. More on this later.
++ We'll serve up our application with uvicorn, and host the backend on localhost:8000.
++ All other environment variables will be taken from our `.env` file.
+
+And finally - lets build our docker container and get our server up and running.
+
+## Bootstrapping our application
+
+To build the appropriate Docker container, run the following from your terminal:
+
+```bash
+docker-compose up -d --build
+```
+
+This will take a little while, so sit back and sip on that coffee you made earlier. 
+
+When it's done building, enter your container with:
+
+```bash
+docker-compose up
+```
+
+You should see some friendly logging giving you some info on how your server is doing. 
+
+Open up your favorite browser and go to localhost:8000. You should see the first json response from your server:
+
+```js
+{"detail":"Not Found"}
+
+```
+
+### Routing
+
+Let's set up a few routes to get our application off the ground. The routing system in FastAPI is pretty straightforward.
+
+We'll start by creating a new directory inside of `backend/app/api` called `routes` and a new routing file, `cleanings.py`.
+
+```bash
+mkdir backend/app/api/routes
+touch backend/app/api/routes/__init__.py backend/app/api/routes/cleanings.py
+```
+
+Inside your `cleanings.py` file, we'll create a router, and add a few standard routes to get a feel for how this works in FastAPI.
+
+```python:title=<span>api/routes/cleanings.py</span>
+from typing import List
+
+from fastapi import APIRouter
+
+
+router = APIRouter()
+
+
+# highlight-start
+# highlight-end
+@router.get("/")
+async def get_all_cleanings() -> List[dict]:
+    cleanings = [
+        {"id": 1, "name": "My house", "cleaning_type": "full_clean", "price_per_hour": 29.99},
+        {"id": 2, "name": "Someone else's house", "cleaning_type": "spot_clean", "price_per_hour": 19.99}
+    ]
+
+    return cleanings
+
+```
+
+Then, in the `backend/app/api/routes/__init__.py` file, we'll create another router, import the router we just built, and assign it to the cleanings namespace.
+
+
+```python:title=<span>api/routes/__init__.py</span>
+from fastapi import APIRouter
+
+from app.api.routes.cleanings import router as cleanings_router
+
+
+router = APIRouter()
+
+
+router.include_router(cleanings_router, prefix="/cleanings", tags=["cleanings"])
+
+```
+
+
+And now do the same in your `server.py` file.
+
+```python:title=<span>server.py</span>
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.routes import router as api_router
+
+
+def get_application():
+    app = FastAPI(title="Phresh", version="1.0.0")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(api_router, prefix="/api")
+
+    return app
+
+
+app = get_application()
+
+```
+
+Now head back to your browser and open up localhost:8000/api/cleanings/ and you should see the json response consisting of both cleanings we defined in our GET route.
+
+```json
+[{"id": 1, "name": "My house", "cleaning_type": "full_clean", "price": 29.99},{"id": 2, "name": "Someone else's house", "cleaning_type": "spot_clean", "price": 19.99}]
+
+```
+
+Amazing! And with that, we've bootstrapped a simple API using FastAPI and Docker.
+
+## Wrapping Up and Resources
+
+In the next post, we'll set up a container hosting a PostgreSQL database and hook it up to our FastAPI backend. In the next couple, we'll start testing our application using Pytest, Docker, and httpx.
+
++ FastAPI [documentation](https://fastapi.tiangolo.com/tutorial/)
++ Starlette [documentation](https://www.starlette.io/)
++ Docker [documentation](https://www.docker.com/get-started)
++ Toptal: High-performing Apps with Python – introductory [blog post](https://www.toptal.com/python/build-high-performing-apps-with-the-python-fastapi-framework) focused on building a todo app from scratch with FastAPI using the SQLAlchemy ORM.
+
+## Github Repo
+
+All code up to this point can be found under the `master` branch.
++ https://github.com/Jastor11/phresh-tutorial

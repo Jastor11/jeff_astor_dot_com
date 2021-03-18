@@ -1,0 +1,1167 @@
+---
+title: "Evaluations and SQL Aggregations in FastAPI"
+date: 2020-07-21
+published: "true"
+slug: "evaluations-and-sql-aggreations-in-fastapi"
+series: up-and-running-with-fastapi
+tags:
+    - python
+    - fastapi
+    - server
+    - postgres
+    - databases
+    - sql
+    - docker
+    - pytest
+    - testing
+---
+import { FastAPISeriesList } from "src/components"
+
+Welcome to Part 12 of Up and Running with FastAPI. If you missed part 11, you can find it [here](/blog/user-owned-resources-in-fastapi).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={12} />
+
+In the last post, we implemented the beginnings of a marketplace-like environment where users can accept, reject, cancel, and rescind offers for cleaning jobs. Now we're going to provide owners the ability to mark jobs as completed and evaluate the cleaner's work. On top of that, we'll provide a way to aggregate user evaluations and serve up a brief overview on the quality of a given cleaner's work.
+
+## Migrations
+
+Of course, we'll need to update our database to make this happen.
+
+Start by rolling back the current migrations as we've done previously.
+
+```bash
+docker ps 
+docker exec -it [CONTAINER_ID] bash 
+alembic downgrade base
+```
+
+Then go ahead and create a new table in the same migrations file like so:
+
+```python
+# ...other code
+
+
+def create_cleaner_evaluations_table() -> None:
+    """
+    Owner of a cleaning job should be able to evaluate a cleaner's execution of the job.
+
+    - Allow owner to leave ratings, headline, and comment
+    - Also add no show if the cleaner failed to show up
+    - Rating split into sections
+        - professionalism - did they handle things like pros?
+        - completeness - how thorough were they? did everything get cleaned as it should have?
+        - efficiency - how quickly and effectively did they get the job done?
+        - overall - what's the consensus rating for this cleaning job?
+    """
+    op.create_table(
+        "cleaning_to_cleaner_evaluations",
+        sa.Column(
+            "cleaning_id",  # job that was completed
+            sa.Integer,
+            sa.ForeignKey("cleanings.id", ondelete="SET NULL"),
+            nullable=False,
+            index=True,
+        ),
+        sa.Column(
+            "cleaner_id",  # user who completed the job
+            sa.Integer,
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=False,
+            index=True,
+        ),
+        sa.Column("no_show", sa.Boolean, nullable=False, server_default="False"),
+        sa.Column("headline", sa.Text, nullable=True),
+        sa.Column("comment", sa.Text, nullable=True),
+        sa.Column("professionalism", sa.Integer, nullable=True),
+        sa.Column("completeness", sa.Integer, nullable=True),
+        sa.Column("efficiency", sa.Integer, nullable=True),
+        sa.Column("overall_rating", sa.Integer, nullable=False),
+        *timestamps(),
+    )
+    op.create_primary_key(
+        "pk_cleaning_to_cleaner_evaluations", "cleaning_to_cleaner_evaluations", ["cleaning_id", "cleaner_id"]
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_cleaning_to_cleaner_evaluations_modtime
+            BEFORE UPDATE
+            ON cleaning_to_cleaner_evaluations
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def upgrade() -> None:
+    create_updated_at_trigger()
+    create_users_table()
+    create_profiles_table()
+    create_cleanings_table()
+    create_offers_table()
+    create_cleaner_evaluations_table()
+
+
+def downgrade() -> None:
+    op.drop_table("cleaning_to_cleaner_evaluations")
+    op.drop_table("user_offers_for_cleanings")
+    op.drop_table("cleanings")
+    op.drop_table("profiles")
+    op.drop_table("users")
+    op.execute("DROP FUNCTION update_updated_at_column")
+
+```
+
+Notice how we don't include the owner of the cleaning job in this table? We don't need to. The `cleaning_id` has a unique owners column attached, so there's no need to add redundant data here.
+
+This table will give the owner of a cleaning job the ability to evaluate a cleaner in 3 categories - professionalism, completeness, and efficiency. These are arbitrary, so feel free to change them. We also provide an `overall_rating` column for a more generalized evaluation. We again guarantee uniqueness between a cleaning job and a cleaner by using the combination of those two to create our primary key.
+
+Run the migrations with `alembic upgrade head` and move on to the models.
+
+## Evaluation models
+
+Create a new evaluation models file:
+
+```bash
+touch backend/app/models/evaluation.py
+```
+
+And add the following:
+
+```python:title=<span>models/evaluation.py</span>
+from typing import Optional, Union
+
+from pydantic import conint, confloat, Field
+
+from app.models.core import DateTimeModelMixin, CoreModel
+from app.models.user import UserPublic
+from app.models.cleaning import CleaningPublic
+
+
+class EvaluationBase(CoreModel):
+    no_show: bool = False
+    headline: Optional[str]
+    comment: Optional[str]
+    professionalism: Optional[conint(ge=0, le=5)]
+    completeness: Optional[conint(ge=0, le=5)]
+    efficiency: Optional[conint(ge=0, le=5)]
+    overall_rating: Optional[conint(ge=0, le=5)]
+
+
+class EvaluationCreate(EvaluationBase):
+    overall_rating: conint(ge=0, le=5)
+
+
+class EvaluationUpdate(EvaluationBase):
+    pass
+
+
+class EvaluationInDB(DateTimeModelMixin, EvaluationBase):
+    cleaner_id: int
+    cleaning_id: int
+
+
+class EvaluationPublic(EvaluationInDB):
+    owner: Optional[Union[int, UserPublic]]
+    cleaner: Union[int, UserPublic] = Field(..., alias="cleaner_id")
+    cleaning: Union[int, CleaningPublic] = Field(..., alias="cleaning_id")
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class EvaluationAggregate(CoreModel):
+    avg_professionalism: confloat(ge=0, le=5)
+    avg_completeness: confloat(ge=0, le=5)
+    avg_efficiency: confloat(ge=0, le=5)
+    avg_overall_rating: confloat(ge=0, le=5)
+    max_overall_rating: conint(ge=0, le=5)
+    min_overall_rating: conint(ge=0, le=5)
+    one_stars: conint(ge=0)
+    two_stars: conint(ge=0)
+    three_stars: conint(ge=0)
+    four_stars: conint(ge=0)
+    five_stars: conint(ge=0)
+    total_evaluations: conint(ge=0)
+    total_no_show: conint(ge=0)
+
+```
+
+For the most part we simply mirror the functionality of the models in our `offer.py` file, though we're using a `conint` type here for ratings. The docs for that constrained type can be found [here](https://pydantic-docs.helpmanual.io/usage/types/#constrained-types) and allow us to specify that these ratings must be an integer between 0 and 5, inclusive.
+
+The only attribute we require to create an evaluation is `overall_rating`. We also provide the ability to attach the owner to the `EvaluationPublic` model if we feel like doing so.
+
+At the bottom we see something new - the `EvaluationAggregate` model. Here we collect summary statistics about a given cleaner similar to how Amazon, Yelp, and other rating sites do. We're using `conint` and `confloat` to restrict the values slightly.
+
+Now let's do some testing.
+
+## Testing Evaluation Routes
+
+First, create a new testing file:
+
+```bash
+touch backend/tests/test_evaluations.py
+```
+
+And create our standard test routes class.
+
+```python:title=<span>tests/test_evaluations.py</span>
+from typing import List, Callable
+
+import pytest
+
+from httpx import AsyncClient
+from fastapi import FastAPI, status
+
+from app.models.cleaning import CleaningInDB
+from app.models.user import UserInDB
+from app.models.offer import OfferInDB
+from app.models.evaluation import EvaluationCreate, EvaluationInDB, EvaluationPublic, EvaluationAggregate
+from app.db.repositories.evaluations import EvaluationsRepository
+
+
+pytestmark = pytest.mark.asyncio
+
+
+class TestEvaluationRoutes:
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(
+            app.url_path_for("evaluations:create-evaluation-for-cleaner", cleaning_id=1, username="bradpitt")
+        )
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+        res = await client.get(
+            app.url_path_for("evaluations:get-evaluation-for-cleaner", cleaning_id=1, username="bradpitt")
+        )
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+        res = await client.get(app.url_path_for("evaluations:list-evaluations-for-cleaner", username="bradpitt"))
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+        res = await client.get(app.url_path_for("evaluations:get-stats-for-cleaner", username="bradpitt"))
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+```
+
+Not much to see here. We're only testing the existence of three routes - create, get, and list. For the time being, we won't allow owners to delete or update their evaluations, though that may change later.
+
+Run the tests and watch them fail.
+
+We'll need to create a routes, dependency, and repository file for our evaluations as well. Might as well do them all together here:
+
+```bash
+touch backend/app/api/routes/evaluations.py
+touch backend/app/api/dependencies/evaluations.py
+touch backend/app/db/repositories/evaluations.py
+```
+
+Now add some dummy routes to the routes file.
+
+```python:title=<span>api/routes/evaluations.py</span>
+from typing import List
+
+from fastapi import APIRouter, Depends, Body, Path, status
+
+from app.models.evaluation import EvaluationCreate, EvaluationInDB, EvaluationPublic, EvaluationAggregate
+from app.models.user import UserInDB
+from app.models.cleaning import CleaningInDB
+
+from app.db.repositories.evaluations import EvaluationsRepository
+
+from app.api.dependencies.database import get_repository
+from app.api.dependencies.cleanings import get_cleaning_by_id_from_path
+from app.api.dependencies.users import get_user_by_username_from_path
+
+
+router = APIRouter()
+
+
+# highlight-start
+# highlight-end
+@router.post(
+    "/{cleaning_id}/",
+    response_model=EvaluationPublic,
+    name="evaluations:create-evaluation-for-cleaner",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_evaluation_for_cleaner(
+    evaluation_create: EvaluationCreate = Body(..., embed=True),
+) -> EvaluationPublic:
+    return None
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/",
+    response_model=List[EvaluationPublic],
+    name="evaluations:list-evaluations-for-cleaner",
+)
+async def list_evaluations_for_cleaner() -> List[EvaluationPublic]:
+    return None
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/stats/", response_model=EvaluationAggregate, name="evaluations:get-stats-for-cleaner",
+)
+async def get_stats_for_cleaner() -> EvaluationAggregate:
+    return None 
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/{cleaning_id}/",
+    response_model=EvaluationPublic,
+    name="evaluations:get-evaluation-for-cleaner",
+)
+async def get_evaluation_for_cleaner() -> EvaluationPublic:
+    return None
+
+```
+
+Let's also go ahead and register those routes in our api router.
+
+```python:title=<span>api/routes/__init__.py</span>
+from fastapi import APIRouter
+
+from app.api.routes.cleanings import router as cleanings_router
+from app.api.routes.users import router as users_router
+from app.api.routes.profiles import router as profiles_router
+from app.api.routes.offers import router as offers_router
+from app.api.routes.evaluations import router as evaluations_router  # highlight-line
+
+
+router = APIRouter()
+
+
+router.include_router(cleanings_router, prefix="/cleanings", tags=["cleanings"])
+router.include_router(users_router, prefix="/users", tags=["users"])
+router.include_router(profiles_router, prefix="/profiles", tags=["profiles"])
+router.include_router(offers_router, prefix="/cleanings/{cleaning_id}/offers", tags=["offers"])
+router.include_router(evaluations_router, prefix="/users/{username}/evaluations", tags=["evaluations"])  # highlight-line
+
+```
+
+This time we're namespacing the evaluations router under `users/{username}/evaluations`. It's essentially the reverse of what we did with offers and will be useful for when we want to aggregate user statistics later on.
+
+Before we can get our tests passing, we'll need a placeholder `EvaluationsRepository`, so add this as well.
+
+```python:title=<span>db/repositories/evaluations.py</span>
+from typing import List
+
+from databases import Database
+
+from app.db.repositories.base import BaseRepository
+from app.db.repositories.offers import OffersRepository
+
+from app.models.cleaning import CleaningInDB
+from app.models.user import UserInDB
+from app.models.evaluation import EvaluationCreate, EvaluationUpdate, EvaluationInDB, EvaluationAggregate
+
+
+class EvaluationsRepository(BaseRepository):
+    def __init__(self, db: Database) -> None:
+        super().__init__(db)
+        self.offers_repo = OffersRepository(db)
+
+```
+
+We're integrating the `OffersRepository` in our `__init__` method, as we'll need it in a minute.
+
+Run the tests now and they should pass.
+
+## Create Evaluations
+
+Let's begin with some standard tests. Here's the functionality we want to implement:
+
+1. Owners of a cleaning job can leave evaluations for cleaners who completed that cleaning job.
+2. Evaluations can only be made for jobs that have been accepted.
+3. Evaluations can only be made for users whose offer was accepted for that job.
+4. Evaluations can only be left once per cleaning.
+5. Once an evaluation has been made, the offer should be marked as completed.
+
+Let's test those conditions with a new test class.
+
+```python:title=<span>tests/test_evaluations.py</span>
+# ...other code
+
+
+class TestCreateEvaluations:
+    async def test_owner_can_leave_evaluation_for_cleaner_and_mark_offer_completed(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user3: UserInDB,
+        test_cleaning_with_accepted_offer: CleaningInDB,
+    ) -> None:
+        evaluation_create = EvaluationCreate(
+            no_show=False,
+            headline="Excellent job",
+            comment=f"""
+Really appreciated the hard work and effort they put into this job!
+Though the cleaner took their time, I would definitely hire them again for the quality of their work.
+            """,
+            professionalism=5,
+            completeness=5,
+            efficiency=4,
+            overall_rating=5,
+        )
+
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.post(
+            app.url_path_for(
+                "evaluations:create-evaluation-for-cleaner",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user3.username,
+            ),
+            json={"evaluation_create": evaluation_create.dict()},
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+        evaluation = EvaluationInDB(**res.json())
+        assert evaluation.no_show == evaluation_create.no_show
+        assert evaluation.headline == evaluation_create.headline
+        assert evaluation.overall_rating == evaluation_create.overall_rating
+
+        # check that the offer has now been marked as "completed"
+        res = await authorized_client.get(
+            app.url_path_for(
+                "offers:get-offer-from-user",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user3.username,
+            )
+        )
+        assert res.status_code == status.HTTP_200_OK
+        assert res.json()["status"] == "completed"
+
+    async def test_non_owner_cant_leave_review(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user4: UserInDB,
+        test_user3: UserInDB,
+        test_cleaning_with_accepted_offer: CleaningInDB,
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user4)
+        res = await authorized_client.post(
+            app.url_path_for(
+                "evaluations:create-evaluation-for-cleaner",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user3.username,
+            ),
+            json={"evaluation_create": {"overall_rating": 2}},
+        )
+        assert res.status_code == status.HTTP_403_FORBIDDEN
+
+    async def test_owner_cant_leave_review_for_wrong_user(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user4: UserInDB,
+        test_cleaning_with_accepted_offer: CleaningInDB,
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.post(
+            app.url_path_for(
+                "evaluations:create-evaluation-for-cleaner",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user4.username,
+            ),
+            json={"evaluation_create": {"overall_rating": 1}},
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+    async def test_owner_cant_leave_multiple_reviews(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user3: UserInDB,
+        test_cleaning_with_accepted_offer: CleaningInDB,
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.post(
+            app.url_path_for(
+                "evaluations:create-evaluation-for-cleaner",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user3.username,
+            ),
+            json={"evaluation_create": {"overall_rating": 3}},
+        )
+        assert res.status_code == status.HTTP_201_CREATED
+
+        res = await authorized_client.post(
+            app.url_path_for(
+                "evaluations:create-evaluation-for-cleaner",
+                cleaning_id=test_cleaning_with_accepted_offer.id,
+                username=test_user3.username,
+            ),
+            json={"evaluation_create": {"overall_rating": 1}},
+        )
+        assert res.status_code == status.HTTP_400_BAD_REQUEST
+
+```
+
+Ok, we have four new test cases that should cover the functionality we are hoping to implement. In the first tests case we're checking to make sure the status of our offer is `"completed"` as soon as the evaluation has been created. We haven't added that option to any of our offer models, so keep that in mind as we start fleshing out our `EvaluationsRepository`.
+
+In fact, let's start writing the code our `POST` route will need so that we can determine how our database interface should look.
+
+```python:title=<span>api/routes/evaluations.py</span>
+# ...other code
+
+
+# highlight-start
+# highlight-end
+@router.post(
+    "/{cleaning_id}/",
+    response_model=EvaluationPublic,
+    name="evaluations:create-evaluation-for-cleaner",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_evaluation_for_cleaner(
+    evaluation_create: EvaluationCreate = Body(..., embed=True),
+    cleaning: CleaningInDB = Depends(get_cleaning_by_id_from_path),
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),    
+) -> EvaluationPublic:
+    return await evals_repo.create_evaluation_for_cleaner(
+        evaluation_create=evaluation_create, cleaner=cleaner, cleaning=cleaning
+    )
+
+# ...other code
+
+```
+
+This route is mostly dependencies. We return the result of a single call to our `EvaluationsRepository` with the `create_evaluation_for_cleaner` method. That method takes in the `cleaner` who is being evaluated, the `cleaning` job the cleaner has completed, and the `evaluation_create` that's being added to the database. We've already defined each of the needed dependencies in our previous posts, so no need to touch our `api/dependencies/evaluations.py` file just yet.
+
+Let's head into our `EvaluationsRepository`.
+
+```python:title=<span>db/repositories/evaluations.py</span>
+# ...other code
+
+CREATE_OWNER_EVALUATION_FOR_CLEANER_QUERY = """
+    INSERT INTO cleaning_to_cleaner_evaluations (
+        cleaning_id,
+        cleaner_id,
+        no_show,
+        headline,
+        comment,
+        professionalism,
+        completeness,
+        efficiency,
+        overall_rating
+    )
+    VALUES (
+        :cleaning_id,
+        :cleaner_id,
+        :no_show,
+        :headline,
+        :comment,
+        :professionalism,
+        :completeness,
+        :efficiency,
+        :overall_rating
+    )
+    RETURNING no_show,
+              cleaning_id,
+              cleaner_id,
+              headline,
+              comment,
+              professionalism,
+              completeness,
+              efficiency,
+              overall_rating,
+              created_at,
+              updated_at;
+"""
+
+
+class EvaluationsRepository(BaseRepository):
+    def __init__(self, db: Database) -> None:
+        super().__init__(db)
+        self.offers_repo = OffersRepository(db)
+
+    async def create_evaluation_for_cleaner(
+        self, *, evaluation_create: EvaluationCreate, cleaning: CleaningInDB, cleaner: UserInDB
+    ) -> EvaluationInDB:
+        async with self.db.transaction():
+            created_evaluation = await self.db.fetch_one(
+                query=CREATE_OWNER_EVALUATION_FOR_CLEANER_QUERY,
+                values={**evaluation_create.dict(), "cleaning_id": cleaning.id, "cleaner_id": cleaner.id},
+            )
+
+            # also mark offer as completed
+            await self.offers_repo.mark_offer_completed(cleaning=cleaning, cleaner=cleaner)
+
+            return EvaluationInDB(**created_evaluation)
+
+```
+
+Ok, now we've got something going. We execute our queries inside a transaction block so that this becomes an all-or-nothing trip to the db. First, we create the new evaluation and attach the `cleaning_id` and `cleaner_id` to it. Then, we mark the cleaner's offer for this job as `"completed"` using a yet-to-be-created method on the `OffersRepository` called `mark_offer_completed`. If all goes well, we return the newly-created evaluation.
+
+We'll need to define the `mark_offer_completed` next, so open up that file.
+
+```python:title=<span>db/repositories/offers.py</span>
+# ...other code
+
+MARK_OFFER_COMPLETED_QUERY = """
+    UPDATE user_offers_for_cleanings
+    SET status = 'completed'
+    WHERE cleaning_id = :cleaning_id AND user_id = :user_id
+"""
+
+
+class OffersRepository(BaseRepository):
+    # ...other code
+
+    async def mark_offer_completed(self, *, cleaning: CleaningInDB, cleaner: UserInDB) -> OfferInDB:
+        return await self.db.fetch_one(
+            query=MARK_OFFER_COMPLETED_QUERY,  # owner of cleaning marks job status as completed
+            values={"cleaning_id": cleaning.id, "user_id": cleaner.id},
+        )
+    
+```
+
+Nothing too crazy here. We simply add a method to set the status of the offer as `"completed"`. We'll also need to update the `models/offer.py` file to recognize this option for status, so open up that file and modify it like so:
+
+```python:title=<span>models/offer.py</span>
+# ...other code
+
+class OfferStatus(str, Enum):
+    accepted = "accepted"
+    rejected = "rejected"
+    pending = "pending"
+    cancelled = "cancelled"
+    completed = "completed"
+
+# ...other code
+
+```
+
+And there we go! Run the tests again and the first condition should pass. The other tests are returning 201 responses instead of the 403 and 400s we expect, so we'll need to create a new dependency to deal with that properly.
+
+```python:title=<span>api/dependencies/evaluations.py</span>
+from typing import List
+
+from fastapi import HTTPException, Depends, Path, status
+
+from app.models.user import UserInDB
+from app.models.cleaning import CleaningInDB
+from app.models.offer import OfferInDB
+from app.models.evaluation import EvaluationInDB
+
+from app.db.repositories.evaluations import EvaluationsRepository
+
+from app.api.dependencies.database import get_repository
+from app.api.dependencies.auth import get_current_active_user
+from app.api.dependencies.users import get_user_by_username_from_path
+from app.api.dependencies.cleanings import get_cleaning_by_id_from_path
+from app.api.dependencies.offers import get_offer_for_cleaning_from_user_by_path
+
+
+async def check_evaluation_create_permissions(
+    current_user: UserInDB = Depends(get_current_active_user),
+    cleaning: CleaningInDB = Depends(get_cleaning_by_id_from_path),
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    offer: OfferInDB = Depends(get_offer_for_cleaning_from_user_by_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),
+) -> None:
+    # Check that only owners of a cleaning can leave evaluations for that cleaning job
+    if cleaning.owner != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Users are unable to leave evaluations for cleaning jobs they do not own.",
+        )
+    # Check that evaluations can only be made for jobs that have been accepted
+    # Also serves to ensure that only one evaluation per-cleaner-per-job is allowed
+    if offer.status != "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only users with accepted offers can be evaluated.",
+        )
+    # Check that evaluations can only be made for users whose offer was accepted for that job
+    if offer.user_id != cleaner.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You are not authorized to leave an evaluation for this user.",
+        )
+
+```
+
+Though we're only checking three conditions here, it feels like there's a lot going on with this dependency. We get the cleaning, cleaner, and offer from path parameters using dependencies we've defined in previous posts, and we grab the current user making the request. Composing dependencies in this manner is a clean way to manage resource access. Having already tested their behavior, we can be relatively confident that they're behaving the way we expect them to.
+
+So all we need to do is check that the currently authenticated user is the owner of the cleaning job, that the status of the offer in question is `"accepted"`, and that the cleaner being evaluated is the one who created the offer.
+
+Let's update our `POST` route with this new dependency.
+
+```python:title=<span>api/routes/evaluations.py</span>
+# ...other code
+from app.api.dependencies.evaluations import check_evaluation_create_permissions
+
+
+# highlight-start
+# highlight-end
+@router.post(
+    "/{cleaning_id}/",
+    response_model=EvaluationPublic,
+    name="evaluations:create-evaluation-for-cleaner",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_evaluation_create_permissions)],
+)
+async def create_evaluation_for_cleaner(
+    evaluation_create: EvaluationCreate = Body(..., embed=True),
+    cleaning: CleaningInDB = Depends(get_cleaning_by_id_from_path),
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),    
+) -> EvaluationPublic:
+    return await evals_repo.create_evaluation_for_cleaner(
+        evaluation_create=evaluation_create, cleaner=cleaner, cleaning=cleaning
+    )
+
+# ...other code
+
+```
+
+Run those tests again...and they pass! Fantastic.
+
+On to the `GET` routes.
+
+## Fetching Evaluations
+
+Before we start listing evaluations, we'll need to create a new pytest `fixture` in our `conftest.py` file.
+
+We'll begin by defining a helper function and then move to our `fixture`.
+
+```python:title=<span>tests/conftest.py</span>
+# ...other code
+
+import random
+
+# ...other code
+
+from app.models.evaluation import EvaluationCreate
+from app.db.repositories.evaluations import EvaluationsRepository
+
+
+# ...other code
+
+
+async def create_cleaning_with_evaluated_offer_helper(
+    db: Database,
+    owner: UserInDB,
+    cleaner: UserInDB,
+    cleaning_create: CleaningCreate,
+    evaluation_create: EvaluationCreate,
+) -> CleaningInDB:
+    cleaning_repo = CleaningsRepository(db)
+    offers_repo = OffersRepository(db)
+    evals_repo = EvaluationsRepository(db)
+
+    created_cleaning = await cleaning_repo.create_cleaning(new_cleaning=cleaning_create, requesting_user=owner)
+    offer = await offers_repo.create_offer_for_cleaning(
+        new_offer=OfferCreate(cleaning_id=created_cleaning.id, user_id=cleaner.id)
+    )
+    await offers_repo.accept_offer(offer=offer, offer_update=OfferUpdate(status="accepted"))
+    await evals_repo.create_evaluation_for_cleaner(
+        evaluation_create=evaluation_create, cleaning=created_cleaning, cleaner=cleaner,
+    )
+    return created_cleaning
+
+
+# highlight-start
+# highlight-end
+@pytest.fixture
+async def test_list_of_cleanings_with_evaluated_offer(
+    db: Database, test_user2: UserInDB, test_user3: UserInDB,
+) -> List[CleaningInDB]:
+    return [
+        await create_cleaning_with_evaluated_offer_helper(
+            db=db,
+            owner=test_user2,
+            cleaner=test_user3,
+            cleaning_create=CleaningCreate(
+                name=f"test cleaning - {i}",
+                description=f"test description - {i}",
+                price=float(f"{i}9.99"),
+                cleaning_type="full_clean",
+            ),
+            evaluation_create=EvaluationCreate(
+                professionalism=random.randint(0, 5),
+                completeness=random.randint(0, 5),
+                efficiency=random.randint(0, 5),
+                overall_rating=random.randint(0, 5),
+                headline=f"test headline - {i}",
+                comment=f"test comment - {i}",
+            ),
+        )
+        for i in range(5)
+    ]
+
+```
+
+Ok. So we're creating 5 new cleaning jobs and making an offer for each one. We then accept the offer and create an evaluation for it with some random rating values. This will be useful when we start aggregating them.
+
+With that in place, let's start testing.
+
+Add this following new test case to the `tests/test_evaluations.py` file.
+
+```python:title=<span>tests/test_evaluations.py</span>
+from statistics import mean
+
+# ...other code
+
+
+class TestGetEvaluations:
+    """
+    Test that authenticated user who is not owner or cleaner can fetch a single evaluation
+    Test that authenticated user can fetch all of a cleaner's evaluations
+    Test that a cleaner's evaluations comes with an aggregate
+    """
+
+    async def test_authenticated_user_can_get_evaluation_for_cleaning(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user3: UserInDB,
+        test_user4: UserInDB,
+        test_list_of_cleanings_with_evaluated_offer: List[CleaningInDB],
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user4)
+        res = await authorized_client.get(
+            app.url_path_for(
+                "evaluations:get-evaluation-for-cleaner",
+                cleaning_id=test_list_of_cleanings_with_evaluated_offer[0].id,
+                username=test_user3.username,
+            )
+        )
+        assert res.status_code == status.HTTP_200_OK
+        evaluation = EvaluationPublic(**res.json())
+        assert evaluation.cleaning == test_list_of_cleanings_with_evaluated_offer[0].id
+        assert evaluation.cleaner == test_user3.id
+        assert "test headline" in evaluation.headline
+        assert "test comment" in evaluation.comment
+        assert evaluation.professionalism >= 0 and evaluation.professionalism <= 5
+        assert evaluation.completeness >= 0 and evaluation.completeness <= 5
+        assert evaluation.efficiency >= 0 and evaluation.efficiency <= 5
+        assert evaluation.overall_rating >= 0 and evaluation.overall_rating <= 5
+
+    async def test_authenticated_user_can_get_list_of_evaluations_for_cleaner(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user3: UserInDB,
+        test_user4: UserInDB,
+        test_list_of_cleanings_with_evaluated_offer: List[CleaningInDB],
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user4)
+        res = await authorized_client.get(
+            app.url_path_for("evaluations:list-evaluations-for-cleaner", username=test_user3.username)
+        )
+        assert res.status_code == status.HTTP_200_OK
+        evaluations = [EvaluationPublic(**e) for e in res.json()]
+        assert len(evaluations) > 1
+        for evaluation in evaluations:
+            assert evaluation.cleaner == test_user3.id
+            assert evaluation.overall_rating >= 0
+
+    async def test_authenticated_user_can_get_aggregate_stats_for_cleaner(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user3: UserInDB,
+        test_user4: UserInDB,
+        test_list_of_cleanings_with_evaluated_offer: List[CleaningInDB],
+    ) -> None:
+        authorized_client = create_authorized_client(user=test_user4)
+        res = await authorized_client.get(
+            app.url_path_for("evaluations:list-evaluations-for-cleaner", username=test_user3.username)
+        )
+        assert res.status_code == status.HTTP_200_OK
+        evaluations = [EvaluationPublic(**e) for e in res.json()]
+
+        res = await authorized_client.get(
+            app.url_path_for("evaluations:get-stats-for-cleaner", username=test_user3.username)
+        )
+        assert res.status_code == status.HTTP_200_OK
+        stats = EvaluationAggregate(**res.json())
+
+        assert len(evaluations) == stats.total_evaluations
+        assert max([e.overall_rating for e in evaluations]) == stats.max_overall_rating
+        assert min([e.overall_rating for e in evaluations]) == stats.min_overall_rating
+        assert mean([e.overall_rating for e in evaluations]) == stats.avg_overall_rating
+        assert (
+            mean([e.professionalism for e in evaluations if e.professionalism is not None]) == stats.avg_professionalism
+        )
+        assert mean([e.completeness for e in evaluations if e.completeness is not None]) == stats.avg_completeness
+        assert mean([e.efficiency for e in evaluations if e.efficiency is not None]) == stats.avg_efficiency
+        assert len([e for e in evaluations if e.overall_rating == 1]) == stats.one_stars
+        assert len([e for e in evaluations if e.overall_rating == 2]) == stats.two_stars
+        assert len([e for e in evaluations if e.overall_rating == 3]) == stats.three_stars
+        assert len([e for e in evaluations if e.overall_rating == 4]) == stats.four_stars
+        assert len([e for e in evaluations if e.overall_rating == 5]) == stats.five_stars
+
+    async def test_unauthenticated_user_forbidden_from_get_requests(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        test_user3: UserInDB,
+        test_list_of_cleanings_with_evaluated_offer: List[CleaningInDB],
+    ) -> None:
+        res = await client.get(
+            app.url_path_for(
+                "evaluations:get-evaluation-for-cleaner",
+                cleaning_id=test_list_of_cleanings_with_evaluated_offer[0].id,
+                username=test_user3.username,
+            )
+        )
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+        res = await client.get(
+            app.url_path_for("evaluations:list-evaluations-for-cleaner", username=test_user3.username)
+        )
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+```
+
+Oh my.
+
+We ensure that any user can fetch a single evaluation or a list of evaluations for a given cleaner. We also expect that users can fetch aggregate ratings for a given cleaner - things like average rating and the number of 5 star ratings, 4 star ratings, etc.
+
+Instead of doing the mean calculations by hand, we're importing the statistics package and letting it handle the calculations for us.
+
+Run those tests and watch them fail miserably. Looks like we have some work to do.
+
+Let's hop over to our routes and flesh them out.
+
+```python:title=<span>api/routes/evaluations.py</span>
+# ...other code
+
+from app.api.dependencies.evaluations import (
+    check_evaluation_create_permissions,
+    list_evaluations_for_cleaner_from_path,
+    get_cleaner_evaluation_for_cleaning_from_path,
+)
+
+# ...other code
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/",
+    response_model=List[EvaluationPublic],
+    name="evaluations:list-evaluations-for-cleaner",
+)
+async def list_evaluations_for_cleaner(
+    evaluations: List[EvaluationInDB] = Depends(list_evaluations_for_cleaner_from_path)
+) -> List[EvaluationPublic]:
+    return evaluations
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/stats/", response_model=EvaluationAggregate, name="evaluations:get-stats-for-cleaner",
+)
+async def get_stats_for_cleaner(
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),
+) -> EvaluationAggregate:
+    return await evals_repo.get_cleaner_aggregates(cleaner=cleaner) 
+
+
+# highlight-start
+# highlight-end
+@router.get(
+    "/{cleaning_id}/",
+    response_model=EvaluationPublic,
+    name="evaluations:get-evaluation-for-cleaner",
+)
+async def get_evaluation_for_cleaner(
+    evaluation: EvaluationInDB = Depends(get_cleaner_evaluation_for_cleaning_from_path),
+) -> EvaluationPublic:
+    return evaluation
+
+```
+
+As we've done before, most of the grunt work is handled by our dependencies. 
+
+> Important note! The order in which we define these routes ABSOLUTELY DOES MATTER. If we were to put the `/stats/` route after our `evaluations:get-evaluation-for-cleaner` route, that stats route wouldn't work. FastAPI would assume that "stats" is the ID of a cleaning and throw a 422 error since "stats" is not an integer id.
+
+We're primarily using two dependendencies to do the evaluation fetching, so we'll need to create those.
+
+```python:title=<span>api/routes/evaluations.py</span>
+# ...other code
+
+
+async def list_evaluations_for_cleaner_from_path(
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),
+) -> List[EvaluationInDB]:
+    return await evals_repo.list_evaluations_for_cleaner(cleaner=cleaner)
+
+
+async def get_cleaner_evaluation_for_cleaning_from_path(
+    cleaning: CleaningInDB = Depends(get_cleaning_by_id_from_path),
+    cleaner: UserInDB = Depends(get_user_by_username_from_path),
+    evals_repo: EvaluationsRepository = Depends(get_repository(EvaluationsRepository)),
+) -> EvaluationInDB:
+    evaluation = await evals_repo.get_cleaner_evaluation_for_cleaning(cleaning=cleaning, cleaner=cleaner)
+
+    if not evaluation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No evaluation found for that cleaning.")
+
+    return evaluation
+
+```
+
+We have two standard dependencies, each using the `EvaluationsRepository` to fetch evaluations depending on resources fetched from the path parameters.
+
+Let's add the needed methods to our evals repo.
+
+```python:title=<span>db/repositories/evaluations.py</span>
+# ...other code
+
+GET_CLEANER_EVALUATION_FOR_CLEANING_QUERY = """
+    SELECT no_show,
+           cleaning_id,
+           cleaner_id,
+           headline,
+           comment,
+           professionalism,
+           completeness,
+           efficiency,
+           overall_rating,
+           created_at,
+           updated_at
+    FROM cleaning_to_cleaner_evaluations
+    WHERE cleaning_id = :cleaning_id AND cleaner_id = :cleaner_id;
+"""
+
+LIST_EVALUATIONS_FOR_CLEANER_QUERY = """
+    SELECT no_show,
+           cleaning_id,
+           cleaner_id,
+           headline,
+           comment,
+           professionalism,
+           completeness,
+           efficiency,
+           overall_rating,
+           created_at,
+           updated_at
+    FROM cleaning_to_cleaner_evaluations
+    WHERE cleaner_id = :cleaner_id;
+"""
+
+GET_CLEANER_AGGREGATE_RATINGS_QUERY = """
+    SELECT        
+        AVG(professionalism) AS avg_professionalism,
+        AVG(completeness)    AS avg_completeness,
+        AVG(efficiency)      AS avg_efficiency,
+        AVG(overall_rating)  AS avg_overall_rating,
+        MIN(overall_rating)  AS min_overall_rating,
+        MAX(overall_rating)  AS max_overall_rating,
+        COUNT(cleaning_id)   AS total_evaluations,
+        SUM(no_show::int)    AS total_no_show,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 1) AS one_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 2) AS two_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 3) AS three_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 4) AS four_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 5) AS five_stars
+    FROM cleaning_to_cleaner_evaluations
+    WHERE cleaner_id = :cleaner_id;
+"""
+
+
+class EvaluationsRepository(BaseRepository):
+    # ...other code
+
+    async def get_cleaner_evaluation_for_cleaning(self, *, cleaning: CleaningInDB, cleaner: UserInDB) -> EvaluationInDB:
+        evaluation = await self.db.fetch_one(
+            query=GET_CLEANER_EVALUATION_FOR_CLEANING_QUERY,
+            values={"cleaning_id": cleaning.id, "cleaner_id": cleaner.id},
+        )
+
+        if not evaluation:
+            return None
+
+        return EvaluationInDB(**evaluation)
+
+    async def list_evaluations_for_cleaner(self, *, cleaner: UserInDB) -> List[EvaluationInDB]:
+        evaluations = await self.db.fetch_all(
+            query=LIST_EVALUATIONS_FOR_CLEANER_QUERY, values={"cleaner_id": cleaner.id}
+        )
+
+        return [EvaluationInDB(**e) for e in evaluations]
+
+    async def get_cleaner_aggregates(self, *, cleaner: UserInDB) -> EvaluationAggregate:
+        return await self.db.fetch_one(query=GET_CLEANER_AGGREGATE_RATINGS_QUERY, values={"cleaner_id": cleaner.id})
+
+```
+
+Some interesting stuff going on here, mostly in the SQL for our `GET_CLEANER_AGGREGATE_RATINGS_QUERY`.
+
+We'll break down each chunk of `SELECT` statements to illustrate what's happening. If we only queried the average values, our SQL would look like this:
+
+```sql
+    SELECT        
+        AVG(professionalism) AS avg_professionalism,
+        AVG(completeness)    AS avg_completeness,
+        AVG(efficiency)      AS avg_efficiency,
+        AVG(overall_rating)  AS avg_overall_rating
+    FROM cleaning_to_cleaner_evaluations
+    WHERE cleaner_id = :cleaner_id;
+```
+
+We find all rows where the `cleaner_id` matches the user in question. We then use the `AVG` aggregation to find the mean of each rating category. This is what users probably care about most, and so it's important to provide that for each cleaner.
+
+Moving on to querying only the sums, here's what our SQL would look like:
+
+```sql
+    SELECT
+        COUNT(cleaning_id)   AS total_evaluations,
+        SUM(no_show::int)    AS total_no_show,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 1) AS one_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 2) AS two_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 3) AS three_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 4) AS four_stars,
+        COUNT(overall_rating) FILTER(WHERE overall_rating = 5) AS five_stars
+    FROM cleaning_to_cleaner_evaluations
+    WHERE cleaner_id = :cleaner_id;
+```
+
+We have two interesting selections and one standard one. 
+
++ `COUNT(cleaning_id) AS total_evaluations` simply determines the number of rows that exist for this cleaner.
++ `SUM(no_show::int) AS total_no_show` casts the boolean `no_show` value to an integer of 1 or 0, and then sums the values.
++ `COUNT(overall_rating) FILTER(WHERE overall_rating = 1) ...` uses the `FILTER` statement to only include rows where the `overall_rating` was assigned a value of `1` and then counts them up. This is done for all star values and will be used to show a bar chart when displaying aggregate values.
+
+We also have a maximum and minimum overall rating just to round things off.
+
+All together this query provides us with a nice set of aggregate statistics that we can send to our frontend when needed.
+Doing this in SQL is much more performant than any other approach, so we'll lean heavily on postgres when we need to.
+
+Run the tests again and they should all pass.
+
+## Wrapping Up and Resources
+
+Well there you have it. We've added an evaluation system to our application and used SQL aggregations to provide summary statistics for a given cleaner. At the moment there's no payment system, and we're letting users sort that out under the table. 
+
+Now seems like the right time to start building our front end, so we'll do that in the next post.
+
++ Postgresql aggregate functions [docs](https://www.postgresql.org/docs/current/functions-aggregate.html)
++ SQL Bolt Queries with Aggregates [Part 1](https://sqlbolt.com/lesson/select_queries_with_aggregates)
++ SQL Bolt Queries with Aggregates [Part 2](https://sqlbolt.com/lesson/select_queries_with_aggregates_pt_2)
++ Mode Analytics SQL Aggregations [tutorial](https://mode.com/sql-tutorial/sql-aggregate-functions/)
++ Modern SQL Filter Statement [guide](https://modern-sql.com/feature/filter)
+
+## Github Repo
+
+All code up to this point can be found here:
++ https://github.com/Jastor11/phresh-tutorial/tree/tutorial-part-12-evaluations-and-sql-aggregations

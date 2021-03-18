@@ -1,0 +1,1192 @@
+---
+title: "Edit User-Owned Cleaning Resources with React and FastAPI"
+category: "React"
+date: 2020-12-08
+slug: "edit-user-owned-cleaning-resources-with-react-and-fastapi"
+published: "true"
+series: up-and-running-with-fastapi
+tags:
+    - fastapi
+    - javascript
+    - react
+    - course
+    - elastic ui
+    - styled components
+    - redux
+    - axios
+    - hooks
+---
+import { FastAPISeriesList, CodesandboxDisplay } from "src/components"
+
+Welcome to Part 18 of Up and Running with FastAPI. If you missed part 17, you can find it [here](/blog/consuming-a-fastapi-backend-from-a-react-frontend).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={18} />
+
+In the previous article in this series, we started consuming cleaning resources sent by our FastAPI backend and gave authenticated users the ability to create new cleaning jobs from our React frontend. We also modified our backend to provide user info along with any cleaning jobs returned from our endpoints.
+
+This time around, we'll briefly cover allowing users to edit cleaning resources they've posted, as long as they haven't already accepted an offer.
+
+## Adding An Edit Cleaning Route
+
+Start by adding a new component to the project.
+
+```bash
+mkdir src/components/CleaningJobEditForm
+touch src/components/CleaningJobEditForm/CleaningJobEditForm.js
+```
+
+Then add just a tiny bit of code...
+
+```jsx:title=<span>CleaningJobEditForm.js</span>
+import React from "react"
+import styled from "styled-components"
+
+const Wrapper = styled.div`
+  padding: 1rem 2rem;
+`
+
+function CleaningJobEditForm({ cleaningJob, cleaningError, isUpdating, updateCleaning }) {
+  return (
+    <Wrapper>
+      <>Edit form goes here</>
+    </Wrapper>
+  )
+}
+
+export default CleaningJobEditForm
+```
+
+And export it.
+
+```jsx:title=<span>components/index.js</span>
+export { default as App } from "./App/App"
+export { default as Carousel } from "./Carousel/Carousel"
+export { default as CarouselTitle } from "./CarouselTitle/CarouselTitle"
+export { default as CleaningJobCard } from "./CleaningJobCard/CleaningJobCard"
+export { default as CleaningJobCreateForm } from "./CleaningJobCreateForm/CleaningJobCreateForm"
+export { default as CleaningJobEditForm } from "./CleaningJobEditForm/CleaningJobEditForm" // highlight-line
+export { default as CleaningJobView } from "./CleaningJobView/CleaningJobView"
+export { default as CleaningJobsHome } from "./CleaningJobsHome/CleaningJobsHome"
+export { default as CleaningJobsPage } from "./CleaningJobsPage/CleaningJobsPage"
+export { default as LandingPage } from "./LandingPage/LandingPage"
+export { default as Layout } from "./Layout/Layout"
+export { default as LoginForm } from "./LoginForm/LoginForm"
+export { default as LoginPage } from "./LoginPage/LoginPage"
+export { default as Navbar } from "./Navbar/Navbar"
+export { default as NotFoundPage } from "./NotFoundPage/NotFoundPage"
+export { default as ProfilePage } from "./ProfilePage/ProfilePage"
+export { default as ProtectedRoute } from "./ProtectedRoute/ProtectedRoute"
+export { default as RegistrationForm } from "./RegistrationForm/RegistrationForm"
+export { default as RegistrationPage } from "./RegistrationPage/RegistrationPage"
+
+```
+
+Then let's go ahead and refactor a few components. 
+
+We're going to update the routing configuration so that `/cleaning-jobs/2` displays the cleaning resource in a card, but `/cleaning-jobs/2/edit` pulls up a form to edit that resource as long as the currently logged in user is the owner.
+
+First, head into the `CleaningJobsPage.js` component and update it like so:
+
+```jsx:title=<span>CleaningJobsPage.js</span>
+import React from "react"
+import { CleaningJobsHome, CleaningJobView, NotFoundPage } from "../../components"
+import { Routes, Route } from "react-router-dom"
+
+export default function CleaningJobsPage() {
+  return (
+    <>
+      <Routes>
+        <Route path="/" element={<CleaningJobsHome />} />
+        <Route path=":cleaning_id/*" element={<CleaningJobView />} />  // highlight-line
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </>
+  )
+}
+
+```
+
+We've added a wildcard operator (`*`) at the end of our `:cleaning_id` route to match any suffix appended to the id of the resource. Doing so allows us to nest a router inside the `CleaningJobView` component and display an update form when the user navigates to the `/edit` route.
+
+Open `CleaningJobView.js` and make the following changes:
+
+```jsx:title=<span>CleaningJobView.js</span>
+import React from "react"
+import { Routes, Route, useNavigate } from "react-router-dom" // highlight-line
+import { connect } from "react-redux"
+import { Actions as cleaningActions } from "../../redux/cleanings"
+import {
+  EuiAvatar,
+  EuiFlexGroup,
+  EuiFlexItem,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiLoadingSpinner,
+  EuiTitle,
+} from "@elastic/eui"
+import { CleaningJobCard, CleaningJobEditForm, NotFoundPage } from "../../components"  // highlight-line
+import { useParams } from "react-router-dom"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+`
+const StyledFlexGroup = styled(EuiFlexGroup)`
+  padding: 1rem;
+`
+
+function CleaningJobView({
+  isLoading,
+  cleaningError,
+  currentCleaningJob,
+  fetchCleaningJobById,
+  clearCurrentCleaningJob,
+}) {
+  const { cleaning_id } = useParams()
+  const navigate = useNavigate() // highlight-line
+
+  React.useEffect(() => {
+    if (cleaning_id) {
+      fetchCleaningJobById({ cleaning_id })
+    }
+
+    return () => clearCurrentCleaningJob()
+  }, [cleaning_id, fetchCleaningJobById, clearCurrentCleaningJob])
+
+  if (isLoading) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob?.name) return <NotFoundPage />
+
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <EuiPageContent verticalPosition="center" horizontalPosition="center" paddingSize="none">
+
+          <StyledFlexGroup justifyContent="flexStart" alignItems="center">
+            <EuiFlexItem grow={false}>
+              <EuiAvatar
+                size="xl"
+                name={currentCleaningJob.owner?.profile?.full_name || currentCleaningJob.owner?.username || "Anonymous"}
+                initialsLength={2}
+                imageUrl={currentCleaningJob.owner?.profile?.image}
+              />
+            </EuiFlexItem>
+            <EuiFlexItem>
+              <EuiTitle>
+                <p>@{currentCleaningJob.owner?.username}</p>
+              </EuiTitle>
+            </EuiFlexItem>
+          </StyledFlexGroup>
+
+          <EuiPageContentBody>
+            // highlight-start
+            <Routes>
+              <Route path="/" element={<CleaningJobCard cleaningJob={currentCleaningJob} />} />
+              <Route path="/edit" element={<CleaningJobEditForm cleaningJob={currentCleaningJob} />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+            // highlight-end
+          </EuiPageContentBody>
+        </EuiPageContent>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+
+export default connect(
+  (state) => ({
+    isLoading: state.cleanings.isLoading,
+    cleaningError: state.cleanings.cleaningsError,
+    currentCleaningJob: state.cleanings.currentCleaningJob,
+  }),
+  {
+    fetchCleaningJobById: cleaningActions.fetchCleaningJobById,
+    clearCurrentCleaningJob: cleaningActions.clearCurrentCleaningJob,
+  }
+)(CleaningJobView)
+
+```
+
+We import the `Router` and `Route` components along with the `useNavigate` hook from `react-router-dom`. On top of that we import the `CleaningJobEditForm` component that we just created. At the bottom of the component, we add our nested router that map `CleaningJobCard` to the default `/` path and `CleaningJobEditForm` to the `/edit` path. Anything else gets routed to `NotFoundPage`.
+
+If we create a cleaning listing and then manually navigate to `/cleaning-jobs/{id}/edit`, we'll see our dummy component in action. It would be much nicer if we could allow the user to navigate to that edit form themselves. 
+
+Let's do that now.
+
+```jsx:title=<span>CleaningJobView.js</span>
+import React from "react"
+import { Routes, Route, useNavigate } from "react-router-dom"
+import { connect } from "react-redux"
+import { Actions as cleaningActions } from "../../redux/cleanings"
+import {
+  EuiAvatar,
+  EuiButtonEmpty,  // highlight-line
+  EuiButtonIcon,  // highlight-line
+  EuiFlexGroup,
+  EuiFlexItem,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiLoadingSpinner,
+  EuiTitle,
+} from "@elastic/eui"
+import { CleaningJobCard, CleaningJobEditForm, NotFoundPage } from "../../components"
+import { useParams } from "react-router-dom"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+`
+const StyledFlexGroup = styled(EuiFlexGroup)`
+  padding: 1rem;
+`
+
+function CleaningJobView({
+  user, // highlight-line
+  isLoading,
+  cleaningError,
+  currentCleaningJob,
+  fetchCleaningJobById,
+  clearCurrentCleaningJob,
+}) {
+  const { cleaning_id } = useParams()
+  const navigate = useNavigate() // highlight-line
+
+  React.useEffect(() => {
+    if (cleaning_id) {
+      fetchCleaningJobById({ cleaning_id })
+    }
+
+    return () => clearCurrentCleaningJob()
+  }, [cleaning_id, fetchCleaningJobById, clearCurrentCleaningJob])
+
+  if (isLoading) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob?.name) return <NotFoundPage />
+
+  // highlight-start
+  const userOwnsCleaningResource = currentCleaningJob?.owner?.id === user?.id
+
+  const editJobButton = userOwnsCleaningResource ? (
+    <EuiButtonIcon iconType="documentEdit" aria-label="edit" onClick={() => navigate(`edit`)} />
+  ) : null
+  const goBackButton = (
+    <EuiButtonEmpty
+      iconType="sortLeft"
+      size="s"
+      onClick={() => navigate(`/cleaning-jobs/${currentCleaningJob.id}`)}
+    >
+      back to job
+    </EuiButtonEmpty>
+  )
+  // highlight-end
+
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <EuiPageContent verticalPosition="center" horizontalPosition="center" paddingSize="none">
+
+          // highlight-start
+          <StyledFlexGroup alignItems="center" direction="row" responsive={false}>
+            <EuiFlexItem>
+              <EuiFlexGroup
+                justifyContent="flexStart"
+                alignItems="center"
+                direction="row"
+                responsive={false}
+              >
+                <EuiFlexItem grow={false}>
+                  <EuiAvatar
+                    size="xl"
+                    name={
+                      currentCleaningJob.owner?.profile?.full_name ||
+                      currentCleaningJob.owner?.username ||
+                      "Anonymous"
+                    }
+                    initialsLength={2}
+                    imageUrl={currentCleaningJob.owner?.profile?.image}
+                  />
+                </EuiFlexItem>
+                <EuiFlexItem>
+                  <EuiTitle>
+                    <p>@{currentCleaningJob.owner?.username}</p>
+                  </EuiTitle>
+                </EuiFlexItem>
+              </EuiFlexGroup>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <Routes>
+                <Route path="/" element={editJobButton} />
+                <Route path="/edit" element={goBackButton} />
+              </Routes>
+            </EuiFlexItem>
+          </StyledFlexGroup>
+          // highlight-end
+
+          <EuiPageContentBody>
+            <Routes>
+              <Route path="/" element={<CleaningJobCard cleaningJob={currentCleaningJob} />} />
+              <Route path="/edit" element={<CleaningJobEditForm cleaningJob={currentCleaningJob} />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </EuiPageContentBody>
+        </EuiPageContent>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+
+export default connect(
+  (state) => ({
+    user: state.auth.user, // highlight-line
+    isLoading: state.cleanings.isLoading,
+    cleaningError: state.cleanings.cleaningsError,
+    currentCleaningJob: state.cleanings.currentCleaningJob,
+  }),
+  {
+    fetchCleaningJobById: cleaningActions.fetchCleaningJobById,
+    clearCurrentCleaningJob: cleaningActions.clearCurrentCleaningJob,
+  }
+)(CleaningJobView)
+
+```
+
+Much better. We've added a few new things.
+
+At the top of the file we import `EuiButtonEmpty` and `EuiButtonIcon` and use both of these components inside an additional router. When the user is at the `/cleaning-jobs/{id}/edit` route, they'll see a back button that navigates to the `/cleaning-jobs/{id}/` path. 
+
+If they're currently viewing the default route, they'll see an edit icon that takes them to the edit form - but only if they are the user that owns the cleaning resource in question. We determine that ownership with the new `user` prop that is passed to our `CleaningJobView` component from the redux state tree.
+
+Now it's time to actually create our edit form.
+
+## Creating The Edit Cleaning Job Form
+
+For the sake of time, we're going to start by copying everything from the `CleaningJobCreateForm` component into our `CleaningJobEditForm` component and then make a few minor adjustments.
+
+```jsx:title=<span>CleaningJobEditForm.js</span>
+import React from "react"
+import { connect } from "react-redux"
+import { Actions as cleaningActions } from "../../redux/cleanings"
+import { useNavigate } from "react-router-dom"
+import {
+  EuiButton,
+  EuiFieldText,
+  EuiForm,
+  EuiFormRow,
+  EuiFieldNumber,
+  EuiSuperSelect,
+  EuiSpacer,
+  EuiText,
+  EuiTextArea
+} from "@elastic/eui"
+import validation from "../../utils/validation"
+import { extractErrorMessages } from "../../utils/errors"
+import styled from "styled-components"
+
+const Wrapper = styled.div`
+  padding: 1rem 2rem;
+`
+
+const cleaningTypeOptions = [
+  {
+    value: "dust_up",
+    inputDisplay: "Dust Up",
+    dropdownDisplay: (
+      <React.Fragment>
+        <strong>Dust Up</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A minimal clean job. Dust shelves and mantels, tidy rooms, and sweep floors.
+          </p>
+        </EuiText>
+      </React.Fragment>
+    )
+  },
+  {
+    value: "spot_clean",
+    inputDisplay: "Spot Clean",
+    dropdownDisplay: (
+      <React.Fragment>
+        <strong>Spot Clean</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A standard clean job. Vacuum all indoor spaces, sanitize surfaces, and disinfect
+            targeted areas. Bathrooms, tubs, and toilets can be added on for an additional charge.
+          </p>
+        </EuiText>
+      </React.Fragment>
+    )
+  },
+  {
+    value: "full_clean",
+    inputDisplay: "Deep Clean",
+    dropdownDisplay: (
+      <React.Fragment>
+        <strong>Deep Clean</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A complete clean job. Mop tile floors, scrub out tough spots, and a guaranteed clean
+            residence upon completion. Dishes, pots, and pans included in this package.
+          </p>
+        </EuiText>
+      </React.Fragment>
+    )
+  }
+]
+
+function CleaningJobEditForm({ cleaningJob, cleaningError, isUpdating, updateCleaning }) {
+  const { name, description, price, cleaning_type } = cleaningJob
+  const [form, setForm] = React.useState({
+    name,
+    description,
+    price,
+    cleaning_type,
+  })
+  const [errors, setErrors] = React.useState({})
+  const [hasSubmitted, setHasSubmitted] = React.useState(false)
+  const navigate = useNavigate()
+  const cleaningErrorList = extractErrorMessages(cleaningError)
+
+  const validateInput = (label, value) => {
+    // grab validation function and run it on input if it exists
+    // if it doesn't exists, just assume the input is valid
+    const isValid = validation?.[label] ? validation?.[label]?.(value) : true
+    // set an error if the validation function did NOT return true
+    setErrors((errors) => ({ ...errors, [label]: !isValid }))
+  }
+
+  const onInputChange = (label, value) => {
+    validateInput(label, value)
+
+    setForm((state) => ({ ...state, [label]: value }))
+  }
+
+  const onCleaningTypeChange = (cleaning_type) => {
+    setForm((state) => ({ ...state, cleaning_type }))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    // validate inputs before submitting
+    Object.keys(form).forEach((label) => validateInput(label, form[label]))
+
+    // if any input hasn't been entered in, return early
+    if (!Object.values(form).every((value) => Boolean(value))) {
+      setErrors((errors) => ({ ...errors, form: `You must fill out all fields.` }))
+      return
+    }
+
+    setHasSubmitted(true)
+
+    const res = await updateCleaning({ cleaning_id: cleaningJob.id, cleaning_update: { ...form } })
+    if (res.success) {
+      // redirect user to updated cleaning job post
+      const cleaningId = res.data?.id
+      navigate(`/cleaning-jobs/${cleaningId}`)
+    }
+  }
+
+  const getFormErrors = () => {
+    const formErrors = []
+
+    if (errors.form) {
+      formErrors.push(errors.form)
+    }
+
+    if (hasSubmitted && cleaningErrorList.length) {
+      return formErrors.concat(cleaningErrorList)
+    }
+
+    return formErrors
+  }
+
+  return (
+    <Wrapper>
+      <EuiForm
+        component="form"
+        onSubmit={handleSubmit}
+        isInvalid={Boolean(getFormErrors().length)}
+        error={getFormErrors()}
+      >
+        <EuiFormRow
+          label="Job Title"
+          helpText="What do you want cleaners to see first?"
+          isInvalid={Boolean(errors.name)}
+          error={`Please enter a valid name.`}
+        >
+          <EuiFieldText
+            name="name"
+            value={form.name}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiFormRow label="Select a cleaning type">
+          <EuiSuperSelect
+            options={cleaningTypeOptions}
+            valueOfSelected={form.cleaning_type}
+            onChange={(value) => onCleaningTypeChange(value)}
+            itemLayoutAlign="top"
+            hasDividers
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Hourly Rate"
+          helpText="List a reasonable price for each hour of work the employee logs."
+          isInvalid={Boolean(errors.price)}
+          error={`Price should match the general format: 9.99`}
+        >
+          <EuiFieldNumber
+            name="price"
+            icon="currency"
+            placeholder="19.99"
+            value={form.price}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Job Description"
+          helpText="What do you want prospective employees to know about this opportunity?"
+          isInvalid={Boolean(errors.description)}
+          error={`Please enter a valid input.`}
+        >
+          <EuiTextArea
+            name="description"
+            placeholder="I'm looking for..."
+            value={form.description}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiSpacer />
+
+        <EuiButton type="submit" isLoading={isUpdating} fill iconType="save" iconSide="right">
+          Update Cleaning
+        </EuiButton>
+      </EuiForm>
+    </Wrapper>
+  )
+}
+
+export default connect(
+  (state) => ({
+    isUpdating: state.cleanings.isUpdating,
+    cleaningError: state.cleanings.error,
+  }),
+  {
+    updateCleaning: cleaningActions.updateCleaningJob
+  }
+)(CleaningJobEditForm)
+
+```
+
+The main changes we've made involve the props we're passing our form component from `redux` and how we initialize our form state.
+
+Because we have access to current cleaning job, at the top of our component we can initialize each of the form fields to the values sent from our FastAPI server. We use destructuring syntax to extract the appropriate properties from the `cleaningJob` prop and pass them directly to our initial form state.
+
+The submit button has also been changed to include a new save icon, and the `isLoading` prop uses a new flag - `isUpdating` - to determine when to show a spinner inside the button. Our `handleSubmit` function is now using a yet-to-be-created `updateCleaning` action creator function from `redux` that will make the necessary HTTP request to the backend. We'll get to both of these in a minute.
+
+> Observant readers will recognize a code smell here. We have introduced **quite** a bit of code duplication. <br /><br /> If we insisted on making this repo as clean and DRY as possible, we could instead create a `CleaningResourceForm` component and have both the `CleaningJobEditForm` and `CleaningJobCreateForm` leverage it. We'll leave that as an exercise for the reader this time around and stick to our current approach.
+
+One more thing we should address before moving on to our `redux` files. Even though we aren't linking directly to the edit form if a user doesn't own this cleaning resource, nothing prevents the user from technically manually navigating to that path. Our backend permissions dependencies would still prevent the user from making any updates, but that behavior is still undesirable.
+
+Any easy remedy to that problem is to create a wrapper component to prevent unauthorized access.
+
+## The PermissionsNeeded Wrapper Component
+
+Create a new file called `PermissionsNeeded.js`.
+
+```bash
+mkdir src/components/PermissionsNeeded
+touch src/components/PermissionsNeeded/PermissionsNeeded.js
+```
+
+And then add the following code to the file:
+
+```jsx:title=<span>PermissionsNeeded.js</span>
+import React from "react"
+import { EuiEmptyPrompt } from "@elastic/eui"
+
+export default function PermissionsNeeded({ element, isAllowed = false }) {
+  if (!isAllowed) {
+    return (
+      <EuiEmptyPrompt
+        iconType="securityApp"
+        iconColor={null}
+        title={<h2>Access Denied</h2>}
+        body={<p>You are not authorized to access this content.</p>}
+      />
+    )
+  }
+
+  return element
+}
+
+```
+
+Nothing too fancy here. We take in an `isAllowed` flag and `element` component as props (using the same syntax that the `Route` component from `react-router-dom` does). If the user isn't authorized to view this content, we render an `"Access Denied"` prompt. Otherwise, we return the element.
+
+Go ahead and export that component.
+
+```jsx:title=<span>components/index.js</span>
+export { default as App } from "./App/App"
+export { default as Carousel } from "./Carousel/Carousel"
+export { default as CarouselTitle } from "./CarouselTitle/CarouselTitle"
+export { default as CleaningJobCard } from "./CleaningJobCard/CleaningJobCard"
+export { default as CleaningJobCreateForm } from "./CleaningJobCreateForm/CleaningJobCreateForm"
+export { default as CleaningJobEditForm } from "./CleaningJobEditForm/CleaningJobEditForm"
+export { default as CleaningJobView } from "./CleaningJobView/CleaningJobView"
+export { default as CleaningJobsHome } from "./CleaningJobsHome/CleaningJobsHome"
+export { default as CleaningJobsPage } from "./CleaningJobsPage/CleaningJobsPage"
+export { default as LandingPage } from "./LandingPage/LandingPage"
+export { default as Layout } from "./Layout/Layout"
+export { default as LoginForm } from "./LoginForm/LoginForm"
+export { default as LoginPage } from "./LoginPage/LoginPage"
+export { default as Navbar } from "./Navbar/Navbar"
+export { default as NotFoundPage } from "./NotFoundPage/NotFoundPage"
+export { default as PermissionsNeeded } from "./PermissionsNeeded/PermissionsNeeded"  // highlight-line
+export { default as ProfilePage } from "./ProfilePage/ProfilePage"
+export { default as ProtectedRoute } from "./ProtectedRoute/ProtectedRoute"
+export { default as RegistrationForm } from "./RegistrationForm/RegistrationForm"
+export { default as RegistrationPage } from "./RegistrationPage/RegistrationPage"
+
+```
+
+Then incorporate it into the `CleaningJobView` component like so:
+
+```jsx:title=<span>CleaningJobView.js</span>
+import React from "react"
+import { Routes, Route, useNavigate } from "react-router-dom"
+import { connect } from "react-redux"
+import { Actions as cleaningActions } from "../../redux/cleanings"
+import {
+  EuiAvatar,
+  EuiButtonEmpty,
+  EuiButtonIcon,
+  EuiFlexGroup,
+  EuiFlexItem,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiLoadingSpinner,
+  EuiTitle
+} from "@elastic/eui"
+import {
+  CleaningJobCard,
+  CleaningJobEditForm,
+  NotFoundPage,
+  PermissionsNeeded,  // highlight-line
+} from "../../components"
+import { useParams } from "react-router-dom"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+`
+const StyledFlexGroup = styled(EuiFlexGroup)`
+  padding: 1rem;
+`
+
+function CleaningJobView({
+  user,
+  isLoading,
+  cleaningError,
+  currentCleaningJob,
+  fetchCleaningJobById,
+  clearCurrentCleaningJob
+}) {
+  const { cleaning_id } = useParams()
+  const navigate = useNavigate()
+
+  React.useEffect(() => {
+    if (cleaning_id) {
+      fetchCleaningJobById({ cleaning_id })
+    }
+
+    return () => clearCurrentCleaningJob()
+  }, [cleaning_id, fetchCleaningJobById, clearCurrentCleaningJob])
+
+  if (isLoading) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob) return <EuiLoadingSpinner size="xl" />
+  if (!currentCleaningJob?.name) return <NotFoundPage />
+
+  const userOwnsCleaningResource = currentCleaningJob?.owner?.id === user?.id
+
+  const editJobButton = userOwnsCleaningResource ? (
+    <EuiButtonIcon iconType="documentEdit" aria-label="edit" onClick={() => navigate(`edit`)} />
+  ) : null
+  const goBackButton = (
+    <EuiButtonEmpty
+      iconType="sortLeft"
+      size="s"
+      onClick={() => navigate(`/cleaning-jobs/${currentCleaningJob.id}`)}
+    >
+      back to job
+    </EuiButtonEmpty>
+  )
+
+  // highlight-start
+  const editCleaningJobElement = (
+    <PermissionsNeeded
+      element={<CleaningJobEditForm cleaningJob={currentCleaningJob} />}
+      isAllowed={userOwnsCleaningResource}
+    />
+  )
+  // highlight-end
+
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <EuiPageContent verticalPosition="center" horizontalPosition="center" paddingSize="none">
+          <StyledFlexGroup alignItems="center" direction="row" responsive={false}>
+            <EuiFlexItem>
+              <EuiFlexGroup
+                justifyContent="flexStart"
+                alignItems="center"
+                direction="row"
+                responsive={false}
+              >
+                <EuiFlexItem grow={false}>
+                  <EuiAvatar
+                    size="xl"
+                    name={
+                      currentCleaningJob.owner?.profile?.full_name ||
+                      currentCleaningJob.owner?.username ||
+                      "Anonymous"
+                    }
+                    initialsLength={2}
+                    imageUrl={currentCleaningJob.owner?.profile?.image}
+                  />
+                </EuiFlexItem>
+                <EuiFlexItem>
+                  <EuiTitle>
+                    <p>@{currentCleaningJob.owner?.username}</p>
+                  </EuiTitle>
+                </EuiFlexItem>
+              </EuiFlexGroup>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <Routes>
+                <Route path="/" element={editJobButton} />
+                <Route path="/edit" element={goBackButton} />
+              </Routes>
+            </EuiFlexItem>
+          </StyledFlexGroup>
+
+          <EuiPageContentBody>
+            <Routes>
+              <Route path="/" element={<CleaningJobCard cleaningJob={currentCleaningJob} />} />
+              <Route path="/edit" element={editCleaningJobElement} />  // highlight-line
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </EuiPageContentBody>
+        </EuiPageContent>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+
+export default connect(
+  (state) => ({
+    user: state.auth.user,
+    isLoading: state.cleanings.isLoading,
+    cleaningError: state.cleanings.cleaningsError,
+    currentCleaningJob: state.cleanings.currentCleaningJob
+  }),
+  {
+    fetchCleaningJobById: cleaningActions.fetchCleaningJobById,
+    clearCurrentCleaningJob: cleaningActions.clearCurrentCleaningJob
+  }
+)(CleaningJobView)
+
+```
+
+There we go.
+
+Try it our yourself. Log in and navigate to a cleaning resource that the authenticated user doesn't own. Tack `/edit` on to the end of the route and see our permissions wrapper at work.
+
+All that's left to handle is the redux piece of the puzzle.
+
+## Adding An Update Cleaning Action Creator
+
+First edit the `redux/initialState.js` file with the `isUpdating` flag:
+
+```jsx:title=<span>redux/initialState.js</span>
+export default {
+  auth: {
+    isLoading: false,
+    isUpdating: false,  // highlight-line
+    isAuthenticated: false,
+    error: false,
+    user: {}
+  },
+  cleanings: {
+    isLoading: false,
+    error: null,
+    data: {},
+    currentCleaningJob: null
+  }
+}
+
+```
+
+Then, open up the `redux/cleanings.js` file and add the following:
+
+```jsx:title=<span>redux/cleanings.js</span>
+import initialState from "./initialState"
+import apiClient from "../services/apiClient"
+
+export const CREATE_CLEANING_JOB = "@@cleanings/CREATE_CLEANING_JOB"
+export const CREATE_CLEANING_JOB_SUCCESS = "@@cleanings/CREATE_CLEANING_JOB_SUCCESS"
+export const CREATE_CLEANING_JOB_FAILURE = "@@cleanings/CREATE_CLEANING_JOB_FAILURE"
+
+export const FETCH_CLEANING_JOB_BY_ID = "@@cleanings/FETCH_CLEANING_JOB_BY_ID"
+export const FETCH_CLEANING_JOB_BY_ID_SUCCESS = "@@cleanings/FETCH_CLEANING_JOB_BY_ID_SUCCESS"
+export const FETCH_CLEANING_JOB_BY_ID_FAILURE = "@@cleanings/FETCH_CLEANING_JOB_BY_ID_FAILURE"
+export const CLEAR_CURRENT_CLEANING_JOB = "@@cleanings/CLEAR_CURRENT_CLEANING_JOB"
+
+// highlight-start
+export const UPDATE_CLEANING_JOB = "@@cleanings/UPDATE_CLEANING_JOB"
+export const UPDATE_CLEANING_JOB_SUCCESS = "@@cleanings/UPDATE_CLEANING_JOB_SUCCESS"
+export const UPDATE_CLEANING_JOB_FAILURE = "@@cleanings/UPDATE_CLEANING_JOB_FAILURE"
+// highlight-end
+
+export default function cleaningsReducer(state = initialState.cleanings, action = {}) {
+  switch (action.type) {
+    case FETCH_CLEANING_JOB_BY_ID:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        currentCleaningJob: action.data
+      }
+    case FETCH_CLEANING_JOB_BY_ID_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error,
+        currentCleaningJob: {}
+      }
+    case CLEAR_CURRENT_CLEANING_JOB:
+      return {
+        ...state,
+        currentCleaningJob: null
+      }
+    case CREATE_CLEANING_JOB:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case CREATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: action.data
+        }
+      }
+    case CREATE_CLEANING_JOB_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error
+      }
+    // highlight-start
+    case UPDATE_CLEANING_JOB:
+      return {
+        ...state,
+        isUpdating: true
+      }
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isUpdating: false,
+        error: null
+      }
+    case UPDATE_CLEANING_JOB_FAILURE:
+      return {
+        ...state,
+        isUpdating: false,
+        error: action.error
+      }
+    // highlight-end
+    default:
+      return state
+  }
+}
+
+export const Actions = {}
+
+Actions.clearCurrentCleaningJob = () => ({ type: CLEAR_CURRENT_CLEANING_JOB })
+
+Actions.createCleaningJob = ({ new_cleaning }) => {
+  return apiClient({
+    url: `/cleanings/`,
+    method: `POST`,
+    types: {
+      REQUEST: CREATE_CLEANING_JOB,
+      SUCCESS: CREATE_CLEANING_JOB_SUCCESS,
+      FAILURE: CREATE_CLEANING_JOB_FAILURE
+    },
+    options: {
+      data: { new_cleaning },
+      params: {}
+    }
+  })
+}
+
+Actions.fetchCleaningJobById = ({ cleaning_id }) => {
+  return apiClient({
+    url: `/cleanings/${cleaning_id}/`,
+    method: `GET`,
+    types: {
+      REQUEST: FETCH_CLEANING_JOB_BY_ID,
+      SUCCESS: FETCH_CLEANING_JOB_BY_ID_SUCCESS,
+      FAILURE: FETCH_CLEANING_JOB_BY_ID_FAILURE
+    },
+    options: {
+      data: {},
+      params: {}
+    }
+  })
+}
+
+// highlight-start
+Actions.updateCleaningJob = ({ cleaning_id, cleaning_update }) => {
+  return (dispatch) => {
+    return dispatch(
+      apiClient({
+        url: `/cleanings/${cleaning_id}/`,
+        method: `PUT`,
+        types: {
+          REQUEST: UPDATE_CLEANING_JOB,
+          SUCCESS: UPDATE_CLEANING_JOB_SUCCESS,
+          FAILURE: UPDATE_CLEANING_JOB_FAILURE
+        },
+        options: {
+          data: { cleaning_update },
+          params: {}
+        },
+        onSuccess: (res) => {
+          // refetch the updated cleaning job
+          dispatch(Actions.fetchCleaningJobById({ cleaning_id }))
+
+          return { success: true, status: res.status, data: res.data }
+        }
+      })
+    )
+  }
+}
+// highlight-end
+
+```
+
+We start by defining three action type constants to represent our application at different stages of the update cleaning process. Then, we use each one to modify the `isUpdating` flag and store any error returned from our server. Notice how our reducer doesn't change the `currentCleaningJob` at all, even when an updated job is returned for `UPDATE_CLEANING_JOB_SUCCESS`? The reason is that we handle updating state in our `updateCleaningJob` action creator.
+
+At the bottom of the file, we define our `Actions.updateCleaningJob` function and use it to make an HTTP `PUT` request to the `/cleanings/${cleaning_id}/` path, sending whatever updates were entered into the `CleaningJobEditForm`. We also attach an `onSuccess` callback that refetches the modified cleaning job from our FastAPI server if all goes well. 
+
+So once a user decides to edit any of the attributes on a cleaning resource they own, our frontend makes the `PUT` request with the appropriate updates and requests the modified cleaning job afterwards.
+
+Try it out! It should work nicely. 
+
+But something else should catch our eye. Are the multiple requests necessary? Couldn't we avoid a roundtrip to the server by simply updating the `currentCleaningJob` with the result of our HTTP `PUT` request? Sure we could! Let's see how that would look instead.
+
+```jsx:title=<span>redux/cleanings.js</span>
+import initialState from "./initialState"
+import apiClient from "../services/apiClient"
+
+export const CREATE_CLEANING_JOB = "@@cleanings/CREATE_CLEANING_JOB"
+export const CREATE_CLEANING_JOB_SUCCESS = "@@cleanings/CREATE_CLEANING_JOB_SUCCESS"
+export const CREATE_CLEANING_JOB_FAILURE = "@@cleanings/CREATE_CLEANING_JOB_FAILURE"
+
+export const FETCH_CLEANING_JOB_BY_ID = "@@cleanings/FETCH_CLEANING_JOB_BY_ID"
+export const FETCH_CLEANING_JOB_BY_ID_SUCCESS = "@@cleanings/FETCH_CLEANING_JOB_BY_ID_SUCCESS"
+export const FETCH_CLEANING_JOB_BY_ID_FAILURE = "@@cleanings/FETCH_CLEANING_JOB_BY_ID_FAILURE"
+export const CLEAR_CURRENT_CLEANING_JOB = "@@cleanings/CLEAR_CURRENT_CLEANING_JOB"
+
+export const UPDATE_CLEANING_JOB = "@@cleanings/UPDATE_CLEANING_JOB"
+export const UPDATE_CLEANING_JOB_SUCCESS = "@@cleanings/UPDATE_CLEANING_JOB_SUCCESS"
+export const UPDATE_CLEANING_JOB_FAILURE = "@@cleanings/UPDATE_CLEANING_JOB_FAILURE"
+
+export default function cleaningsReducer(state = initialState.cleanings, action = {}) {
+  switch (action.type) {
+    case FETCH_CLEANING_JOB_BY_ID:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        currentCleaningJob: action.data
+      }
+    case FETCH_CLEANING_JOB_BY_ID_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error,
+        currentCleaningJob: {}
+      }
+    case CLEAR_CURRENT_CLEANING_JOB:
+      return {
+        ...state,
+        currentCleaningJob: null
+      }
+    case CREATE_CLEANING_JOB:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case CREATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: action.data
+        }
+      }
+    case CREATE_CLEANING_JOB_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error
+      }
+    case UPDATE_CLEANING_JOB:
+      return {
+        ...state,
+        isUpdating: true
+      }
+    // highlight-start
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isUpdating: false,
+        error: null,
+        currentCleaningJob: {
+          ...state.currentCleaningJob,
+          ...Object.keys(action.data).reduce((acc, key) => {
+            // prevent overwriting the cleaning owner's profile
+            if (key !== "owner") acc[key] = action.data[key]
+            return acc
+          }, {})
+        }
+      }
+    // highlight-end
+    case UPDATE_CLEANING_JOB_FAILURE:
+      return {
+        ...state,
+        isUpdating: false,
+        error: action.error
+      }
+    default:
+      return state
+  }
+}
+
+export const Actions = {}
+
+Actions.clearCurrentCleaningJob = () => ({ type: CLEAR_CURRENT_CLEANING_JOB })
+
+Actions.createCleaningJob = ({ new_cleaning }) => {
+  return apiClient({
+    url: `/cleanings/`,
+    method: `POST`,
+    types: {
+      REQUEST: CREATE_CLEANING_JOB,
+      SUCCESS: CREATE_CLEANING_JOB_SUCCESS,
+      FAILURE: CREATE_CLEANING_JOB_FAILURE
+    },
+    options: {
+      data: { new_cleaning },
+      params: {}
+    }
+  })
+}
+
+Actions.fetchCleaningJobById = ({ cleaning_id }) => {
+  return apiClient({
+    url: `/cleanings/${cleaning_id}/`,
+    method: `GET`,
+    types: {
+      REQUEST: FETCH_CLEANING_JOB_BY_ID,
+      SUCCESS: FETCH_CLEANING_JOB_BY_ID_SUCCESS,
+      FAILURE: FETCH_CLEANING_JOB_BY_ID_FAILURE
+    },
+    options: {
+      data: {},
+      params: {}
+    }
+  })
+}
+
+// highlight-start
+Actions.updateCleaningJob = ({ cleaning_id, cleaning_update }) => {
+  return apiClient({
+    url: `/cleanings/${cleaning_id}/`,
+    method: `PUT`,
+    types: {
+      REQUEST: UPDATE_CLEANING_JOB,
+      SUCCESS: UPDATE_CLEANING_JOB_SUCCESS,
+      FAILURE: UPDATE_CLEANING_JOB_FAILURE
+    },
+    options: {
+      data: { cleaning_update },
+      params: {}
+    }
+  })
+}
+// highlight-end
+
+```
+
+The advantages to this approach is that we only make a single api call to our backend and our `updateCleaningJob` function is simplified. The tradeoff is that our `cleaningsReducer` is now clunkier.
+
+In that reducer we use a `reduce` function to compose an object of updates that are spread over the `currentCleaningJob` attribute. When composing that object in our `reduce` function, we skip over the `owner` attribute in the response. We do this because the cleaning resource returned from our FastAPI server for `PUT` requests isn't populated with the full owner profile. If we updated this attribute as well, we'd overwrite all owner profile data with that user's id. In the future, we could populate the response from all `PUT` requests on the FastAPI side to prevent the need for excess reducer code.
+
+Either way works, so it's nice to have both options available to us. We'll be sticking with the latter approach to avoid unnecessary API calls for the time being.
+
+<CodesandboxDisplay
+  codesandboxLink={"https://codesandbox.io/s/phresh-frontend-part-6-editing-a-user-owned-cleaning-resource-pl4o5?file=/src/redux/cleanings.js"}
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-6-editing-a-user-owned-cleaning-resource-pl4o5?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-6-editing-a-user-owned-cleaning-resource",
+    allow: "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+Try it out again. If everything is in order, we should be see our new feature working as expected.
+
+Look at us go!
+
+## Wrapping Up and Resources
+
+We've spent the entirety of this post in our frontend repo, adding more routing and implementing edit functionality. The addition of the `PermissionsNeeded` component also provides us with a way to prevent unauthorized users from accessing resources they're not allowed to.
+
+With that out of the way, it's time to move on to our next challenge. We're almost ready to start building a feed of potential cleaning jobs for users who want to offer their services. However, since we already have an "Offer Services" button on each cleaning job card, it probably makes more sense to first attach the appropriate functionality there. So we'll do that next before moving on to more backend work.
+
++ React Router DOM [page](https://reacttraining.com/blog/react-router-v6-pre/)
++ Elastic UI Button [docs](https://elastic.github.io/eui/#/navigation/button)
++ Elastic UI Icons [docs](https://elastic.github.io/eui/#/display/icons)
++ Elastic UI Empty Prompt [docs](https://elastic.github.io/eui/#/display/empty-prompt)

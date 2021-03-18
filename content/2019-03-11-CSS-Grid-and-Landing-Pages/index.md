@@ -1,0 +1,391 @@
+---
+title: "Using CSS Grid For Landing Pages"
+category: "Web Development"
+date: 2019-03-11
+published: "true"
+slug: "css-grid-and-landing-pages"
+tags:
+    - CSS
+    - css grid
+    - web development
+    - beginner
+    - high school lesson    
+---
+
+In the previous post, we discussed how to create the Holy Grail layout using CSS flexbox - one of the newest additions to CSS. Even newer than flexbox is CSS grid. While flexbox is perfect for laying elements out in 1D, grid helps with 2D layouts and works nicely in conjunction with flexbox. We'll get into the meat of grid in this post.
+
+## CSS Grid
+
+For many web developers, CSS is the most frustrating part of building websites. Fortunately, alleviating the stress of designing layouts has been a priority for the [CSS Working Group](https://en.wikipedia.org/wiki/CSS_Working_Group) over the last few years.
+
+While those who learned CSS before 2010 may have relied heavily on creating tables in HTML to structure their layouts, in recent years tables have fallen out of favor. Taking their place is one of the newest techniques to arrive on the scene - CSS grid.
+
+Writing proper CSS can still be difficult, but hopefully the addition of grid will make designing layouts easier for newcomers to web development. This post will show you how to get started with grid by designing a real product landing page.
+
+<figure>
+  <img src="./css-shades.gif" />
+  <figcaption style="text-align:center">Stolen from r/ProgrammerHumor</figcaption>
+  <br />  
+</figure>
+
+We'll start with an introduction to grid, and quickly move into designing an actual layout for a fake product. The techniques leveraged in this article apply to all layouts, and should be useful for any developer.
+
+Let's get started.
+
+## Intro to CSS Grid
+
+Just like flexbox, if you want to use CSS grid, you have to indicate that you'd like a container to `display: grid;`. Unlike flexbox, when you tell a container holding block-level elements to display grid, nothing happens. Check out these two codepens that prove my point.
+
+Here's a codepen where the container does *not* display grid:
+
+<iframe height="365" style="width: 100%;" scrolling="no" title="CSS Grid Walkthrough #1" src="//codepen.io/jastor11-the-decoder/embed/GeQLmG/?height=265&theme-id=light&default-tab=html,result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/GeQLmG/'>CSS Grid Walkthrough #1</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+and here's the same container where it *does* display grid:
+
+<iframe height="365" style="width: 100%;" scrolling="no" title="CSS Grid Walkthrough #2" src="//codepen.io/jastor11-the-decoder/embed/JzpVJW/?height=265&theme-id=light&default-tab=html,result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/JzpVJW/'>CSS Grid Walkthrough #2</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+Notice the difference? Me neither. (Ok there is a slight difference in spacing at the bottom, but that's unimportant for now.)
+
+The real magic happens when we define a grid-template that specifies how rows and columns in our grid should work.
+
+Right now, our html is simply:
+
+```html
+<section class="grid-container">
+  <div></div>
+  <div></div>
+  <div></div>
+
+  <div></div>
+  <div></div>
+  <div></div>
+
+  <div></div>
+  <div></div>
+  <div></div>   
+</section>
+```
+
+and our css:
+
+```css
+.grid-container {
+  background: wheat;
+  width: 100%;
+  min-height: 100vh;
+  display: grid;
+}
+
+section div {
+  width: 100%;
+  background: teal;
+  margin-bottom: 10px;
+}
+```
+
+## Grid Template
+
+Next we'll add a property to our grid-container that indicates **how many** columns we want and **how wide** we want each column to be. We do that by specifying the grid-template-columns property and the grid-column-gap property like so:
+
+```css
+.grid-container {
+  background: wheat;
+  width: 100%;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 200px auto 200px;
+  grid-column-gap: 20px;
+}
+```
+
+We then see the layout split into three columns - two on the left and the right that are both exactly 200px wide, and a column in the middle that occupies whatever space is left in between (specifying auto handles this). The three columns are a result of indicating three sizes `200px auto 200px` separated by spaces in the grid-template-columns property. There is also a gap of 20px between any two columns that would otherwise be touching.
+
+Play around with the following codepen to see this behavior in action. Resize the screen and watch the middle column change sizes.
+
+<iframe height="365" style="width: 100%;" scrolling="no" title="CSS Grid Walkthrough #3" src="//codepen.io/jastor11-the-decoder/embed/rRJbpL/?height=265&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/rRJbpL/'>CSS Grid Walkthrough #3</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+While this is cool to visualize, it's not yet useful. Let's clean up our html and add content to the middle column.
+
+Replace your HTML code with the following:
+
+```html
+<section class="grid-container">
+  <div></div>
+  <div></div>
+  <div></div>
+
+  <div class="full-width"></div>
+
+  <div></div>
+  <div></div>
+  <div></div>
+</section>
+```
+
+and add this code to the end of your CSS:
+
+```css
+.full-width {
+  grid-column-start: 1;
+  grid-column-end: 4;
+}
+```
+
+This rule tells the div with a class of full-width to start at the beginning of column 1 and end at column 4 (the end of the page). Now we have a middle row that takes up the entire width of the page, while the other two rows follow the same rules as before.
+
+Don't be fooled by how simple this looks. This is an extremely powerful concept. Being able to specify how many columns we want, how big each column should be, and what columns every element starts and end at makes it possible to create complex layouts easily.
+
+We can even simplify the previous code into one line like so:
+
+```css
+.full-width {
+  grid-column: 1 / 4;
+}
+```
+
+The `grid-column` property combines grid column start and grid column end, separated by a `/`. We're also not constrained to only positive numbers. We can use negative numbers to specify how many columns from the end as well. A good way to tell an element to extend from the beginning to the end of its container no matter how many columns it has is to use `grid-column: 1 / -1;`. That is what we'll go with in the next codepen.
+
+```css
+.full-width {
+  grid-column: 1 / -1;
+}
+```
+
+<iframe height="365" style="width: 100%;" scrolling="no" title="CSS Grid Walkthrough #4" src="//codepen.io/jastor11-the-decoder/embed/JzpVqM/?height=265&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/JzpVqM/'>CSS Grid Walkthrough #4</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+<br />
+
+If you're wondering how to specify row size, you're in luck. It's just as easy. Update your CSS code for the  grid container to look like so:
+
+```css
+.grid-container {
+  background: wheat;
+  width: 100%;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 200px auto 200px;
+  grid-column-gap: 20px;
+  grid-template-rows: 100px 300px 100px;
+  grid-row-gap: 20px;
+}
+```
+
+Just like columns, row sizes are specified by separating values with a space. We have also given each row a gap of 20px - the same as our columns. The shorthand notation for specifying the gaps of grid row and grid column gaps is just `grid-column-gap`.
+
+
+Now that we've covered the basics, let's kick it up a notch and build a more complex layout.
+
+## Repeat and fr
+
+Writing CSS for the grid can get repetitive. Fortunately, there are a number of shortcuts for designing common grid layouts.
+
+Two of the most useful ones are the repeat function and the fractional unit.
+
+Frameworks like [bootstrap](https://www.getbootstrap.com) come preloaded with a grid system split into 12 columns. Any developer looking to replicate this layout can do so in two lines of CSS.
+
+```css
+.bootstrap-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+}
+```
+
+<iframe height="365" style="width: 100%;" scrolling="no" title="Grid Walkthrough #5" src="//codepen.io/jastor11-the-decoder/embed/ZPxmWo/?height=265&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/ZPxmWo/'>Grid Walkthrough #5</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+Notice how that breaks up our page into 12 identically-sized columns? The repeat function takes in two values - the number of columns or rows and the amount of space each one should take up. The `1fr` value stands for 1 fraction, and means each column should occupy 1fr of the total 12 fractional units we've defined. If we had specified `repeat(10, 1fr)`, we'd have 10 equally sized columns. We don't always have to use fractional units.
+
+Sometimes pixel values make more sense. If we want 10 equally-sized columns of 100px each, `grid-template-columns: repeat(10, 100px);` will do the job just fine.
+
+Fractional units use cases extend beyond equally-sized rows or columns. They can make your life easier in a number of cases. As [Violet Peña](https://vgpena.github.io/using-css-grid-the-right-way/) puts it, "Fractional units are defined by the space not already used by something else. Fractional units split up this space relative to each other." This concept makes more sense if we have a concrete example.
+
+<iframe height="415" style="width: 100%;" scrolling="no" title="Grid Walkthrough #6" src="//codepen.io/jastor11-the-decoder/embed/aMYPJd/?height=265&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/aMYPJd/'>Grid Walkthrough #6</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+Looking at our grid container, we see that the `grid-template-columns` property contains the value `1fr 3fr`.
+
+```css
+.grid-container {
+  display: grid;
+  grid-template-columns: 1fr 3fr;
+  grid-column-gap: 10px;
+  grid-template-rows: 200px 70px;
+  grid-row-gap: 10px;
+  background: wheat;
+}
+```
+
+Essentially, the columns occupy a total of 4fr. The first column occupies 1 of those 4 fractions (25%), while the second column occupies 3 of the 4 fractions (75%).
+
+Neat. But we can do even better.
+
+## Named Sections and Grid Area
+
+We'll wrap up this post by learning about named grid areas and build ourselves a product landing page. We're going to roughly recreate the landing from this dribbble [post](https://dribbble.com/shots/4386670-Daily-UI-005-MinimaCam-Camera-Landing-Page-Free-PSD).
+
+Though this layout isn't stupidly complicated, it's important to understand what to do when things get more complex. It's easy to get lost when trying to figure out which element belongs where. One solution to this problem is to name each element and refer to them by name in the grid template.
+
+Think of grid area as mapping to the class names. So, if we have some HTML looking like this:
+
+```html
+<section class="grid-container">
+  <div class="product_front"></div>
+  <div class="jumbo"></div>
+  <div class="full-length"></div>
+  <div class="highlight"></div>  
+  <div class="product_top"></div>  
+  <div class="description"></div>
+</section>
+```
+
+Then we'd have some css looking like this:
+
+```css
+body {
+  margin: 0;
+  font-family: Courier New;
+}
+.grid-container {
+  display: grid;
+}
+.product_front {
+  grid-area: pf;
+  background: rgb(241, 236, 226);  
+}
+.jumbo {
+  grid-area: ju;
+}
+.full-length {
+  grid-area: fl;
+}
+.highlight {
+  grid-area: hi;
+}
+.product_top {
+  grid-area: pt;
+  background: rgb(241, 236, 226);  
+}
+.description {
+  grid-area: de;
+}
+```
+
+By naming each section using the grid area property, we assign a nametag that can be used when designing our layout. We simply define a textual representation of our page, and assign it to a `grid-template-areas` property.
+
+Change the CSS for the grid-container section to look like this:
+
+```css
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(13, 1fr);
+  grid-template-rows: 800px 600px 600px 1600px;
+  grid-template-areas:
+  "pf pf pf pf pf pf pf ju ju ju ju ju ju"
+  "fl fl fl fl fl fl fl fl fl fl fl fl fl"
+  "hi hi hi hi hi hi pt pt pt pt pt pt pt"
+  "de de de de de de de de de de de de de";
+}
+```
+
+The first thing to recognize here is that we've created 13 equally-sized columns and 4 rows of varying heights. For the rows, the first one takes up 800px, the second and third 600px, and the final row 1600px. These values are an almost accurate representation of the heights seen in the dribbble post.
+
+Our newly added property, `grid-template-areas`, allows us name the areas that should be assigned to each row/column location. Let's break it down by row.
+
+For row 1 (800px), the div with the class of product_front (grid-area name pf) gets assigned to the first 7 fractions of the first row and the last 6 fractions are assigned to the jumbo div (grid-area name ju).
+
+For row 2 (600px), the full_length div (grid-area name fl) takes up the entire row (all 13 fractions).
+
+For row 3 (600px), the highlight div (grid-area name hi) takes up 6/13 of the row and the product_top div takes up 7/13.
+
+For the final row (1600px), the description div (grid-area name de) also takes up the entire row.
+
+All that work, and what we get is this:
+
+<iframe height="550" style="width: 100%;" scrolling="no" title="Product Landing Part 1" src="//codepen.io/jastor11-the-decoder/embed/rRvVdz/?height=265&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/rRvVdz/'>Product Landing Part 1</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+Not anything special until we had two new background images with a bit of CSS. Modify the `.product_front` and `.product_top` divs with the following code.
+
+```css
+/* ...other CSS     */
+.product_front {
+  grid-area: pf;
+  background-image: url(https://storage.googleapis.com/jeffastor/minicam-1.png);
+  background-size: 100% 100%;
+}
+/* ...other CSS     */
+.product_top {
+  grid-area: pt;
+  background-image: url(https://storage.googleapis.com/jeffastor/minicam-2.png);
+  background-size: 100% 100%;
+}
+/* ...other CSS     */
+```
+
+<iframe height="550" style="width: 100%;" scrolling="no" title="Product Landing Part 2" src="//codepen.io/jastor11-the-decoder/embed/GedpeW/?height=550&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/GedpeW/'>Product Landing Part 2</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+And would you look at that. All we're missing is a few headers, a button, and lorem ipsum text before we have the first three rows sorted out. While you're welcome to try it out yourself, to save you the pain of implementing it, here's a codepen with much of it done.
+
+Note that it doesn't look very nice unless viewed as a full page. Also, the fonts are similar, but not identical. I'm pretty sure that the correct main header font is [Aller](https://fonts.adobe.com/fonts/aller), while the proper main font looks to be [Dunbar](https://fonts.adobe.com/fonts/dunbar). For this demo, I substituted them with PT Sans and Roboto, respectively.
+
+<iframe height="550" style="width: 100%;" scrolling="no" title="Product Landing Part 3" src="//codepen.io/jastor11-the-decoder/embed/bZMLzV/?height=550&theme-id=light&default-tab=result" frameborder="no" allowtransparency="true" allowfullscreen="true">
+  See the Pen <a href='https://codepen.io/jastor11-the-decoder/pen/bZMLzV/'>Product Landing Part 3</a> by Jeff Astor
+  (<a href='https://codepen.io/jastor11-the-decoder'>@jastor11-the-decoder</a>) on <a href='https://codepen.io'>CodePen</a>.
+</iframe>
+
+If you look through the code, you'll also notice we've added a number of media queries to deal with screens of different sizes. Most of them are pretty standard, but the very last one (with a max-width of 700px) has code that updated the `grid-template-columns`, `grid-template-rows`, and `grid-template-areas` properties of the `.grid-container`.
+
+To see what that's doing, resize the width of your browser to below 700px. See how each div now stacks on top of each other? By naming each grid area, we can explicitly determine the order that each section appears in. This my favorite part of CSS grid and the primary reason I recommend front-end developers use it.
+
+For your next challenge, set the description div to display grid and see if you can recreate the rest of the dribbble mockup in CSS grid. Here are the images you'll need to get started.
+
++ [minicam mockup 1](https://storage.googleapis.com/jeffastor/minicam-mockup1.png)
++ [minicam mockup 2](https://storage.googleapis.com/jeffastor/minicam-mockup2.png)
++ [minicam mockup 3](https://storage.googleapis.com/jeffastor/minicam-mockup3.png)
+
+For the description section, you'll need to get both of these images to overlap rows slightly. Here's screenshots of each section to make your life easier.
+
++ [minicam-3](https://storage.googleapis.com/jeffastor/minicam-3.png)
++ [minicam-4](https://storage.googleapis.com/jeffastor/minicam-4.png)
++ [minicam-5](https://storage.googleapis.com/jeffastor/minicam-5.png)
+
+Good luck!
+
+## Wrapping Up and Additional Resources
+
+That's it for now. Hope you enjoyed this walkthrough and learned enough about grid to start building something yourself.
+
+Here's some resources to get you going.
+
++ **CSS Grid Garden** - Get your feet wet in this interactive game by Team Treehouse that has 28 coding challenges all about CSS Grid. https://cssgridgarden.com/
++ **CSS Tricks** - A Complete Guide to CSS Grid (Use as a reference): https://css-tricks.com/snippets/css/complete-guide-grid/
++ **MDN CSS Grid** - https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Grid_Layout
++ **Learn CSS Grid** - Visual guide to a number of common grid layouts: https://learncssgrid.com/
++ **CSS Grid by Wes Bos** - Full course with 24 videos on how to use grid. https://cssgrid.io/
++ **CSS Grid for Designers by NY Times** - This Open New York Times article gives clear examples on how grid can be applied to achieve high quality design layouts. https://open.nytimes.com/css-grid-for-designers-f74a883b98f5
++ **Layout Labs by Jen Simmons** - One of the coolest resources available. Check out all the amazing uses of grid this website showcases: https://labs.jensimmons.com/
++ **CSS Grid Playground** - Really cool tool that makes it easy to play around with grid layouts. https://www.cssgridplayground.com/
++ **Grid by Example** - Amazing set of grid examples that match common use cases for layouts. https://gridbyexample.com/examples/
++ **Grid.cc** - Site with a number of learning resources and grid tools to help get you going.
++ **FreeCodeCamp Grid Challenges** - And as always, FreeCodeCamp offers some sweet grid challenges that will get you up to speed in no time.

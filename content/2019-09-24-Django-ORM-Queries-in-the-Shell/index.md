@@ -1,0 +1,120 @@
+---
+title: "Django ORM Queries in the Shell"
+category: "Databases"
+date: 2019-09-24
+published: "true"
+slug: "django-orm-queries-in-the-shell"
+tags:
+    - python
+    - django
+    - sql
+---
+
+In the last year I took over a Django project with about 200k LOC. The team and I have since added almost 100k more LOC in new features. Accordingly, the complexity of our Django models has grown significantly. 
+
+Much of the time, when I'm looking to add a new feature, I'll run through the relationships between models in the shell. It has saved me a ton of headaches and makes working with Django that much more enjoyable.
+
+Here's how easy it is to jump into the shell and explore your data:
+
+> Since I use docker to containerize all my projects, the first couple steps are docker specific. 
+
+## Navigate to the docker container 
+
+First, start up your app.
+
+```bash
+docker-compose up
+```
+
+Next, find all the running processes.
+
+```bash
+docker ps
+```
+
+The output will look something like this:
+
+
+Find the CONTAINER_ID that matches the server for your django app. Then execute this command to navigate into the terminal for the correct container:
+
+```bash
+docker exec -it CONTAINER_ID bash
+```
+
+And finally
+
+```bash
+./manage.py shell
+```
+
+Amazing. And now we're inside the python shell and can start playing with our database. Here's some example queries that might be useful to start off with.
+
+
+```python
+from ecommerce.api.models import Item, Cart
+```
+
+```python
+Item.objects.all()
+```
+
+```python
+item = Item.objects.get(pk=1)
+```
+
+```python
+cart = Cart()
+```
+
+```python
+cart.add_item(item)
+```
+
+```python
+cart.show_items()
+```
+
+Or for a different different app...
+
+```python
+from sports_team.api.models import Player, Team
+```
+
+```python
+Team.objects.all()
+```
+
+```python
+team = Team()
+```
+
+```python
+player1 = Player('Jeff')
+player2 = Player('Shadira')
+player3 = Player('Jenny')
+```
+
+```python
+team.add_members([player1, player2, player3])
+```
+
+```python
+team.display_members()
+```
+
+Want to get down to some raw SQL? No problem
+
+```python
+user_profiles = UserProfile.objects.raw('SELECT * FROM project_user_profile')
+```
+
+```python
+for profile in user_profiles: print(profile)
+```
+
+> WARNING: No checking is done on the SQL statement that is passed in to .raw(). Django expects that the statement will return a set of rows from the database, but does nothing to enforce that. If the query does not return rows, a (possibly cryptic) error will result.
+
+
+## Resources
+
++ https://chrisbartos.com/articles/test-your-queries-before-they-make-it-into-production-using-the-django-shell/

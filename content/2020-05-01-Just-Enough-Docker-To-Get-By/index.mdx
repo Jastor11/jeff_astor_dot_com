@@ -1,0 +1,174 @@
+---
+title: "Just Enough Docker to Get By"
+category: "DevOps"
+date: 2020-05-01
+published: "true"
+slug: "just-enough-docker-to-get-by"
+tags:
+    - docker
+    - containers
+    - cloud
+---
+
+Docker is one of those technologies you never know you need until you use it. I was one of those people, and my ignorance probably cost me a few month of cumulative development time.
+
+Fortunately, I was shown the error of my ways. Work threw me headfirst into a pool of Docker jargon and buzzwords and forced me to swim. Though I drowned for a while, during the struggle I learned just enough Docker to get by. I'll probably butcher a few of these explanations, but that's ok. I'd like to share what I consider the essentials nuggets of knowledge needed to get started developing with Docker.
+
+Much of this comes from a Front-End Masters Workshop by Brian Holt that can be found [here](https://frontendmasters.com/courses/complete-intro-containers/). I am not affiliated with them in any way, I just like this course.
+
+## So, what is Docker?
+
+Have you ever bought a new macbook computer and then had to set up Microsoft Word, download a few printer drivers, get VS Code up and running, install all 12 GB of XCode from the app store, and uninstall Mcafee anti-virus? Hopefully no one has to actually deal with Mcafee anymore, but the rest are pretty feasible.
+
+Now what if we wanted to do that with 30 different machines? Well, then things get interesting. What if we wanted Node.js v10.12.1 on one, and an anaconda distribution on another? Postgresql? Add on the postgis extension for our geolocation app? What if we want all of those dependencies to look the same on every machine, every time, and behave consistently across the board? What if we want a cluster of 10 machines all running identical versions of a large number of packages?
+
+Well, that's where **Docker** comes in. The role of Docker is to "package software into standardized units for deveopment, shipment, and deployment." It does that by leveraging two core abstractions - **containers** and **images**. TLDR - Docker makes creating, distributing, and running containers easy.  
+
+## Containers and Images
+
+Docker provides [Docker Hub](https://hub.docker.com/search?q=&type=image) - a resource to source, store, and manage images. An image is just a snapshot of how a container should be created. It's a lightweight blueprint that is used to create consistent and predictable computing environments that run on a single machine. Docker can spin up 1000s of **containers** that all share an underlying operating system, each running their own isolated execution environment. If you've heard the term Virtual Machine before, this might look familiar to you.
+
+<figure>
+    <img src="https://cloud.google.com/images/containers-landing/containers-101-2x.png" />
+    <figcaption>Difference between virtual machines and containers - source <a href="https://cloud.google.com/containers/" target="_blank" >google</a></figcaption>
+</figure>
+
+Docker provides a desktop client and container engine consisting of a daemon and other utilities to do container management. Whenever we want want to create a container, we can tell the docker client to pull an image from docker hub, and then use Docker's command-line interface to sping up containers at will.
+
+Go [here](https://www.docker.com/products/docker-desktop) to download Docker Desktop. Be warned that it's going to eat up a lot of memory (like 2GBs) running regularly.
+
+## Using Docker
+
+Docker has a special file called a `Dockerfile` which allows you to outline how a container will be built. Each new line in a Dockerfile is an instruction on how to modify a newly created Docker container.
+
+Here's an example for a FasAPI backend.
+
+```dockerfile
+FROM python:3.8.1-alpine
+WORKDIR /backend
+COPY . /backend
+CMD uvicorn app.api.server.app --reload --host 0.0.0.0 --port 8000
+```
+
+A quick summary of what's happening here:
+
+Each line starts with a command (`FROM`, `WORKDIR`, `COPY`, and `CMD` in this case) followed by the appropriate parameters that tell Docker how to change our container. 
+
+* The `FROM` command specifies what image to pull from Docker Hub. We're pullimg the Alpine 3.8.1 image found [here](https://hub.docker.com/_/alpine).
+* `WORKDIR` works as if you had `cd`'d into that directory, so now all paths are relative to that. if it doesn't exist, Docker creates it.
+* `COPY . /backend` takes everything in our local working directory and copies it into the `/backend` directory in our container.
+* `CMD` executes a single command in the shell of our new container.
+
+A note on why we're using the Alpine image. Alpine is just a bare bones alternative to Ubuntu. It's built on Busybox Linux which is a 2MB distro of Linux, so Alpine is much, much smaller than a standard Ubuntu image (on the order of 100s of MBs).
+
+All we need to do is tell Docker to create a container based on this file, and we'll be good to go. But doing that by hand gets tedious when we want to have multiple containers running and communicating simultaneously. For instance, what if we want to get both a PostgreSQL database and a FastAPI backend going?
+
+Docker provides a handle docker-compose system to help us manage that.
+
+## docker-compose
+
+Docker Compose simplifies the process of coordinating multiple containers and lets us do so with one YAML file.
+
+Here's a real-world example:
+
+```yml
+version: '3.7'
+
+services:
+  server:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend/:/backend/
+    command: uvicorn app.api.server:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    links:    
+      - db
+    environment:
+      DB_CONN: postgresql://postgres:postgres@db:5432/db_name
+    ports:
+      - 8000:8000
+
+  db:
+    image: postgres:12.1-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - 5432:5432
+
+volumes:
+  postgres_data:
+```
+
+We have two separate services here - `server` and `db` - each with their own container. We then identify where the Dockerfile is with `build`, which ports to expose in `ports`, which volumes to make in `volumes`, and any environment variables needed.  The `links` specification lets Docker know that we want these two container to network with each other.
+
+So what benefit does this provide us? With Docker Desktop going, simply run `docker-compose up` in the directory where your `docker-compose.yml` file is located and let Docker do its thing.
+
+We'll see a long output of build logs and when its all done, two running containers! Wow. All that's left is to develop our application. Neat, huh?
+
+## Docker Commands You'll Need At Some Point
+
+With our services setup, we'll want to employ a few useful commands that let us interact with our containers.
+
+```shell
+docker ps
+```
+
+Get a list of all running docker containers and their ids.
+
+```shell
+docker info
+```
+
+Print out information about a given environment.
+
+
+```shell
+docker pull [IMAGE_NAME]
+```
+
+Pull an image from Docker Hub.
+
+```shell
+docker-compose up
+```
+
+Spin up containers with our `docker-compose.yml` file.
+
+```shell
+docker-compose up -d --build
+```
+
+Specify the build flag to tell Docker to check for any changes in our `Dockerfile` or `docker-compose.yml` file and build anything that's not setup yet. The best part is that Docker caches build content locally to speed up or skip anything that doesn't need to be built.
+
+```shell
+docker exec -it [CONTAINER_ID] bash
+```
+
+This allows you to execute a command against a running container. If you run `docker ps` and find the id of a running container, you can replace `[CONTAINER_ID]` with whatever container you're hoping to execute the command in. We're using `bash` here to run some bash commands.
+
+```shell
+docker kill [CONTAINER_ID]
+```
+
+Kill a currently running container using its id.
+
+---
+
+I find myself using these three the most often:
++ `docker-compose up`
++ `docker ps`
++ `docker exec -it [CONTAINER_ID] bash`
+
+When I'm developing an application I usually need to start it up, check what's running, and execute some bash commands. Everything else is a nice to have.
+
+## Wrapping Up and Resources
+
+There's a lot to Docker, so don't feel intimidated by all the commands and lingo. The best way to learn and feel its benefits is by building and deploying something to production. Hopefully this post gives you enough runway to get started.
+
+Here's a list of resources you might find handy:
++ [Intro to Containers Course](https://frontendmasters.com/courses/complete-intro-containers/) from FrontEnd Masters - Polished and well put together course, really solid accompanying notes, and nice high level overview of why containers are so useful. Requires a subscription (~$30 a month), so if you're on a budget just go straight to the [notes](https://btholt.github.io/complete-intro-to-containers/).
++ [Play with Docker](https://labs.play-with-docker.com/) - Learn Docker in the browser. One of the best ways to get some hands on practice with Docker. A great way to get a top-down learning experience without any setup. Also comes with the in-browser [Docker Classroom](https://training.play-with-docker.com/). Developers who are very green to cloud services should start here.
++ [Docker Curriculum](https://docker-curriculum.com/) - The first resource I ever read on the subject
++ [Docker and Kubernetes - The Complete Guide](https://www.udemy.com/course/docker-and-kubernetes-the-complete-guide/) (Costs ~$10) - Pretty much every course Stephen Grider puts out has been amazing. I haven't been disappointed yet, and this course was no different. It's pretty long and goes into production-grade container management with Kubernetes, but is nonetheless fantastic.
++ [Kubernetes the Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way) - Kelsey Hightower is one of my favorite cloud experts to follow. While this course doesn't only cover Docker, you'll learn enough here to manage just about anything on the cloud.
