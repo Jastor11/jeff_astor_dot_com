@@ -43,6 +43,7 @@ exports.onCreateNode = ({ node, actions, getNode }) => {
   }
 }
 
+
 exports.createPages = ({ graphql, actions }) => {
   const { createPage } = actions
 
@@ -55,10 +56,33 @@ exports.createPages = ({ graphql, actions }) => {
       graphql(
         `
           {
-            allMdx(
-              sort: { fields: frontmatter___date, order: DESC }
-              filter: { frontmatter: { published: { eq: "true" } } }
+            deprecatedPosts: allMdx(
+              sort: { fields: fields___date, order: DESC }
+              filter: { frontmatter: { published: { eq: "true" }, deprecated: { eq: "true" } } }
             ) {
+              totalCount
+              edges {
+                node {
+                  frontmatter {
+                    tags
+                    category
+                    published
+                    title
+                    slug
+                    date
+                    deprecated
+                  }
+                  fields {
+                    slug
+                  }
+                }
+              }
+            }
+            activePosts: allMdx(
+              sort: { fields: fields___date, order: DESC }
+              filter: { frontmatter: { published: { eq: "true" }, deprecated: { ne: "true" } } }
+            ) {
+              totalCount
               edges {
                 node {
                   frontmatter {
@@ -86,78 +110,69 @@ exports.createPages = ({ graphql, actions }) => {
         }
         const tagSet = new Set()
         const categorySet = new Set()
-
         const postNodeMapping = new Map()
 
-        const allEdges = result.data.allMdx.edges
+        const { deprecatedPosts, activePosts } = result.data
 
-        allEdges.forEach(({ node }) => {
-          postNodeMapping.set(node?.fields?.slug, node)
+        // first handle setting all deprecated nodes in our mapping
+        deprecatedPosts.edges.forEach(({ node }) => {
+          postNodeMapping.set(node.fields.slug, {
+            path: `/blog${node.fields.slug}`,
+            component: postPage,
+            context: {
+              slug: node.fields.slug,
+            },
+          })
         })
 
-        const deprecatedEdges = result.data.allMdx.edges.filter(({ node }) => node?.frontmatter?.deprecated)
-
-        // grab the edges that aren't deprecated
-        allEdges.forEach(({ node }, idx) => {
-          // add all of the post's tags
+        // then handle setting all active nodes
+        activePosts.edges.forEach(({ node }, idx) => {
+          // add post tags
           if (node.frontmatter.tags) {
             node.frontmatter.tags.forEach((tag) => {
               tagSet.add(tag)
             })
           }
-
           // add the post's category
           if (node.frontmatter.category) {
             categorySet.add(node.frontmatter.category)
           }
-
-          // handle finding next and prev nodes
-          let prevNode = null
-          let nextNode = null
-          let prevPos = idx - 1
-          while (!prevNode) {
-            if (prevPos < 0) break
-
-            let potentialEdge = allEdges[prevPos]
-            if (!deprecatedEdges.includes(potentialEdge)) {
-              if (potentialEdge.node.fields.slug !== node.fields.slug) {
-                prevNode = potentialEdge.node
-              }
-            }
-
-            prevPos -= 1
-          }
-          let nextPos = idx + 1
-          while (!nextNode) {
-            if (nextPos > allEdges.length - 1) break
-
-            let potentialEdge = allEdges[nextPos]
-            if (!deprecatedEdges.includes(potentialEdge)) {
-              if (potentialEdge.node.fields.slug !== node.fields.slug) {
-                nextNode = potentialEdge.node
-              }
-            }
-
-            nextPos += 1
-          }
-
-          // handle finding deprecated nodes
-          const isDeprecated = node?.frontmatter?.deprecated
-          const deprecatedNode = isDeprecated ? node : postNodeMapping.get(`${node.fields.slug}-deprecated`)
-          const deprecatedSlug = deprecatedNode ? deprecatedNode.fields.slug : null
-          const newSlugNode = isDeprecated ? postNodeMapping.get(node.fields.slug.split("-deprecated")[0]) : node
-          const newSlug = newSlugNode ? newSlugNode.fields.slug : null
-
-          createPage({
+          // find the deprecatedNode
+          const deprecatedNodePageProps = postNodeMapping.get(node.fields.slug + "-deprecated")
+          // compose the page properties using the deprecated node if needed
+          const pageProperties = {
             path: `/blog${node.fields.slug}`,
             component: postPage,
             context: {
               slug: node.fields.slug,
-              prevNode,
-              nextNode,
-              isDeprecated,
-              deprecatedSlug,
-              newSlug,
+              isDeprecated: false,
+              deprecatedSlug: deprecatedNodePageProps ? deprecatedNodePageProps.context.slug : null,
+              newSlug: node.fields.slug,
+              prevNode: idx === 0 ? null : activePosts.edges[idx - 1].node,
+              nextNode: idx === activePosts.edges.length - 1 ? null : activePosts.edges[idx + 1].node,
+            },
+          }
+          // set page properties in our nodes mapping
+          postNodeMapping.set(node.fields.slug, pageProperties)
+          // create the page
+          createPage(pageProperties)
+        })
+
+        // now go over all deprecated posts again and use the current version to
+        // compose their page properties
+        deprecatedPosts.edges.forEach(({ node }) => {
+          // find the current post
+          const newPostPageProps = postNodeMapping.get(node.fields.slug.split("-deprecated")[0])
+          // create the page
+          createPage({
+            ...postNodeMapping.get(node.fields.slug),
+            context: {
+              slug: node.fields.slug,
+              prevNode: newPostPageProps.context.prevNode,
+              nextNode: newPostPageProps.context.nextNode,
+              isDeprecated: true,
+              deprecatedSlug: node.fields.slug,
+              newSlug: newPostPageProps.context.slug,
             },
           })
         })
@@ -192,16 +207,7 @@ exports.onCreateWebpackConfig = ({ actions }) => {
   actions.setWebpackConfig({
     resolve: {
       alias: {
-        // assets: path.resolve(__dirname, "src/assets"),
-        // components: path.resolve(__dirname, "src/components"),
         config: path.resolve(__dirname, "config"),
-        // hooks: path.resolve(__dirname, "src/hooks"),
-        // images: path.resolve(__dirname, "src/images"),
-        // layout: path.resolve(__dirname, "src/layout"),
-        // models: path.resolve(__dirname, "src/models"),
-        // pages: path.resolve(__dirname, "src/pages"),
-        // services: path.resolve(__dirname, "src/services"),
-        // utils: path.resolve(__dirname, "src/utils"),
         src: path.resolve(__dirname, "src"),
       },
     },
