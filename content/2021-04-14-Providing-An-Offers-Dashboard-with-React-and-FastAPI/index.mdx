@@ -1,0 +1,165 @@
+---
+title: "Creating a Personalized Dashboard with React and FastAPI"
+category: "Full Stack"
+date: 2021-04-14
+slug: "creating-a-personalized-dashboard-with-react-and-fastapi"
+published: "false"
+series: up-and-running-with-fastapi
+tags:
+  - fastapi
+  - pytest
+  - postgres
+  - sql
+  - javascript
+  - react
+  - course
+  - elastic ui
+  - styled components
+  - redux
+  - axios
+  - hooks
+---
+
+import { FastAPISeriesList, CodesandboxDisplay } from "src/components"
+
+Welcome to Part 23 of Up and Running with FastAPI. If you missed part 22, you can find it [here](/designing-a-feed-page-for-a-fastapi-app").
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={23} />
+
+Last time we built out a `CleaningActivityFeed` component along with a custom `useCleaningFeed` hook that implemented all of the `redux` and async logic needed to fetch paginated lists of cleaning events and display them as a feed for authenticated users.
+
+In this post, we'll begin moving on the evaluations part of our UI. Namely, we'll be building a dashboard interface where users can interact with cleaning jobs and offers they're interested in.
+
+That will require a bit of backend work first, so we'll start on the FastAPI side of things. Just kidding, let's do react first.
+
+## Some new cleaning-related hooks
+
+Then replace everything in the ProfilePage component with this hook.
+
+Then replace everything in the ProtectedRoute component with this hook.
+
+All that repetition dried up! Excellent.
+
+But here's where it gets really cool.
+
+We're going to use this hook, in other hooks! Hookception.
+
+## The useLoginForm Hook
+
+## The useRegistrationForm Hook
+
+Now we'll do the same for our useSingleCleaningJob hook and then we'll use that hook in our useCleaningJobCreateForm and useCleaningJobEditForm hooks.
+
+## The useSingleCleaningJob Hook
+
+Refactor our redux fetch single cleaning job action to store the currentCleaningJob in the "state.cleanings.data" and only use the id as the current cleaning id
+
+Start creating this one and realize we're going to need some cleaning specific data about offers.
+
+So then create an `useOffersForCleaningJob` hook that grabs all the offers for a particular cleaning job and creates the appropriate action handlers
+
+## Fetching All Offers For User-Owned Cleaning Jobs
+
+### Circular Import Problem
+
+- Introduce the well-documented problem with ciruclar imports for Pydantic models
+  - https://github.com/samuelcolvin/pydantic/issues/707
+  - https://github.com/samuelcolvin/pydantic/discussions/2395
+  - https://github.com/samuelcolvin/pydantic/issues/1873
+  - https://pydantic-docs.helpmanual.io/usage/postponed_annotations/#self-referencing-models
+
+Problem is as the last issue states:
+
+> But the solution is quite counterintuitive, so we we need to modify m1.py while import error happens in m2.py, and if there are more models, with some graph of dependencies, things goes more complicated, not sure we can handle three or more models this way. Also placing import in the bottom of the file violates PEP-8.
+
+Start by showing the approach that looks like this:
+
+```python
+from __future__ import annotations
+
+# ...other code
+
+class CleaningPublic(CleaningInDB):
+    owner: Union[int, UserPublic]
+    offers: Optional[List[OfferPublic]] = []
+
+
+from app.models.offer import OfferPublic
+
+CleaningPublic.update_forward_refs()
+
+```
+
+And maybe even show the string version of it.
+
+Then discuss that it violates PEP-8 and is probably inefficient.
+
+Instead, we'll refactor and remove the cleanings attribute from offers.
+
+### Updating the Cleanings Repo and Cleanings Tests
+
+Then, once we add the offers list to CleaningPublic, we'll need to update the repository to exclude "offers" when updating the cleaning model.
+
+We also need to update the get cleaning by id test to ignore offers.
+
+Then we'll write a new test case called `TestPopulatedCleanings`
+
+Make sure to pull in the offers repo into the cleanings repo.
+
+Add a populate param to the `list_all_user_cleanings` method in the `cleanings` repo. Add a `populate_offers` param to the `populate_cleaning` method and use it to grab all offers for the cleaning being requested.
+
+Then the `populate_cleaning` method calls teh offers_repo's `list_offers_for_cleaning` method if `populate_offers` is true, otherwise it defaults to an empty list.
+
+We'll need to update the tests some more.
+
+The `test_get_all_cleanings_returns_only_user_owned_cleanings` will need to parse the cleanings as `CleaningPublic` model now that they're being populated by default. We also have to update the rest of the test since we're comparing `CleaningInDB` models to `CleaningPublic` models.
+
+### Adding One More Test Class For Good Measure
+
+```python
+class TestPopulatedCleanings:
+    async def test_when_user_fetches_their_own_cleanings_they_come_populated_with_offers(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user_list: List[UserInDB],
+        test_list_of_cleanings_with_pending_offers: List[CleaningInDB],
+    ) -> None:
+        test_user_ids = [u.id for u in test_user_list]
+        test_cleaning_ids = [c.id for c in test_list_of_cleanings_with_pending_offers]
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.get(app.url_path_for("cleanings:list-all-user-cleanings"))
+        assert res.status_code == status.HTTP_200_OK
+
+        cleanings = [CleaningPublic(**c) for c in res.json()]
+        for c in cleanings:
+            if c.id in test_cleaning_ids:
+                assert len(c.offers) == len(test_user_list)
+                for offer in c.offers:
+                    assert offer.user_id in test_user_ids
+```
+
+### Normalizing our Redux data
+
+First we start by normalizing the cleaning jobs returned in our `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS` with a `normalizeCleanings` util in the `utils/cleanings` file. We replace all the offers for a cleaning job with an `id`. Then, we'll refactor the `CREATE_CLEANING_JOB_SUCCESS`, `FETCH_CLEANING_JOB_BY_ID_SUCCESS`, and `UPDATE_CLEANING_JOB_SUCCESS` actions to use the same normalizing function. We'll want to change the FETCH_CLEANING_JOB_BY_ID to just use an id as the determining metric and keep the cleaning job in `state.cleaning.data` like the rest of them.
+
+### Refactor Cleaning Redux Logic into Custom Hooks
+
+DO THIS IN THE NEXT POST.... OR MAYBE THE PREVIOUS POST? - Dedicate an entire post to refactoring component logic into custom hooks.
+
+```jsx
+export const useSingleCleaningJob = (cleaningId) => {}
+```
+
+### Normalize Offers By Extracting Them From Cleanings and Adding Them To Redux state
+
+Then we'll use simple redux selectors to access those values from state and compose the proper data into what we need.
+
+### Create a Dashboard Page
+
+### Create a `useUserOwnedCleanings` hook
+
+### Redirect the user to their dashboard upon successful auth instead of their profile page.
