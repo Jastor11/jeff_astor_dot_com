@@ -1,0 +1,2104 @@
+---
+# title: "Creating a Personalized Cleaning Dashboard with React and FastAPI"
+title: "Normalizing FastAPI Entities in Redux"
+category: "React"
+date: 2021-04-14
+# slug: "creating-a-personalized-dashboard-with-react-and-fastapi"
+slug: "normalizing-fastapi-entities-with-react-redux"
+published: "false"
+series: up-and-running-with-fastapi
+tags:
+  - fastapi
+  - pytest
+  - postgres
+  - sql
+  - javascript
+  - react
+  - course
+  - elastic ui
+  - styled components
+  - redux
+  - axios
+  - hooks
+---
+
+import { FastAPISeriesList, CodesandboxDisplay } from "src/components"
+
+Welcome to Part 26 of Up and Running with FastAPI. If you missed part 25, you can find it [here](/blog/populating-cleaning-jobs-with-user-offers-in-fastapi").
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={26} />
+
+<!-- Our last post saw us finish transitioning our UI logic into custom hooks. With much of the tedious labor out of the way, our React app is nearing it's final form. That's right. We're in the endgame now.
+
+But we shouldn't count our chickens before they hatch. There's still work to be done. In particular, cleaning jobs being sent from our FastAPI backend are missing offers. Along with that, we've also removed most of the offer-related UI logic. We'll need to patch both of those issues.
+
+On the API side of things, we could return to our old method of fetching offers for a cleaning job when a given component is mounted. However, it probably makes more sense to populate cleaning jobs with their associated offers when they're sent to the frontend. So for the time being, we'll leave the world of React hooks behind and head to FastAPI land for some backend updates. -->
+
+## Normalizing Offers on the Client
+
+TODO! MAKE SURE THAT WHEN A USER CREATES AN OFFER WE UPDATE THE CLEANING RESOURCES NESTED WITHIN THE CLEANINGS REDUX SLICE ALSO!
+
+If we spin up our React application, and take a look at our redux devtools, we can see the results of our `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS` action whenever an authenticated user is found. If we inspect the `data` attribute of that action, we should be able to see the `total_offers` attribute filled in! Along with that, we should see the array of `offer` objects associated with that cleaning (as long as we've created some dummy offers for one of the cleanings that our logged in user owns).
+
+This is great! And exactly what we wanted.
+
+While this definitely provides us with **what** we need, our new cleaning jobs now have pretty deeply nested data - which is not ideal. The recommended approach from the `redux` team is to **normalize** nested data returned from our API, and then use selectors to derive the complete object when needed.
+
+Let's see how to do that.
+
+First we'll start by normalizing the cleaning jobs returned by our `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS` action. The goal here will be to extract all complete `offer` and `user` objects nested in a cleaning job and add them to their own `redux` slice. We'll then replace each one with a unique id identifying them and making the process of selecting them from our redux store rather trivial.
+
+Start by adding a new function to the `utils/cleanings` file called `normalizeCleanings`.
+
+```jsx:title=<span>utils/cleanings.js</span>
+// ...other code
+
+export const normalizeCleaning = (cleaning) => ({
+    ...cleaning,
+    // replace offers with the id of the user who made the offer
+    offers: cleaning.offers.map(offer => offer.user_id),
+    // replace the owner object with the id of the cleaning job's owner
+    owner: cleaning.owner?.id ?? cleaning.owner,
+})
+
+export const normalizeCleanings = (cleanings) => {
+  return cleanings.map(normalizeCleaning)
+}
+
+```
+
+Nothing fancy here. We take a single `cleaning` object (or an array of objects) and replace all the `offers` array with the id of the user who made the offer. We also replace the `owner` object with its id, unless that value is already an id.
+
+We'll now head into our `redux/cleaning.js` file and update any reducer that fetches a cleaning job to use one of these normalizing functions.
+
+```jsx:title=<span>redux/cleanings.js</span>
+import initialState from "redux/initialState"
+import { REQUEST_LOG_USER_OUT } from "redux/auth"
+import { Actions as uiActions } from "redux/ui"
+import apiClient from "services/apiClient"
+import { normalizeCleaning, normalizeCleanings } from "utils/cleanings"  // highlight-line
+
+// ...other code
+
+export default function cleaningsReducer(state = initialState.cleanings, action = {}) {
+  switch (action.type) {
+    case FETCH_CLEANING_JOB_BY_ID:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: normalizeCleaning(action.data)  // highlight-line
+        },
+        activeCleaningId: action.data.id
+      }
+    case FETCH_CLEANING_JOB_BY_ID_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error
+      }
+
+    // ...other code
+
+    case UPDATE_CLEANING_JOB:
+      return {
+        ...state,
+        isUpdating: true
+      }
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isUpdating: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: normalizeCleaning(action.data) // highlight-line
+        }
+      }
+    case UPDATE_CLEANING_JOB_FAILURE:
+      return {
+        ...state,
+        isUpdating: false,
+        error: action.error
+      }
+    case FETCH_ALL_USER_OWNED_CLEANING_JOBS:
+      return {
+        ...state,
+        isLoading: true
+      }
+    case FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        data: {
+          ...state.data,
+          ...(normalizeCleanings(action.data)).reduce((acc, job) => {  // highlight-line
+            acc[job.id] = job
+            return acc
+          }, {})
+        }
+      }
+    case FETCH_ALL_USER_OWNED_CLEANING_JOBS_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error
+      }
+    case REQUEST_LOG_USER_OUT:
+      return initialState.cleanings
+    default:
+      return state
+  }
+}
+
+Actions.clearCurrentCleaningJob = () => {
+  return (dispatch, getState) => {
+    const state = getState()
+    if (state.cleanings.activeCleaningId) {
+      dispatch({ type: CLEAR_CURRENT_CLEANING_JOB })
+    }
+  }
+}
+
+// ...other code
+
+```
+
+So we've gone ahead and modified the data for three success actions:
+
+- `FETCH_CLEANING_JOB_BY_ID_SUCCESS`
+- `UPDATE_CLEANING_JOB_SUCCESS`
+- `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS`
+
+Each one is now pruning nested data from the cleaning job or jobs returned from our FastAPI backend. We didn't do the same for `CREATE_CLEANING_JOB_SUCCESS` because the `owner` object isn't populated in that response, nor can any offers exist for a job when it's first created. So there we have it!
+
+But, wait a minute. Sure, that worked, but now all of our users are gone! Along with those offers we just spent all that time fetching. We have no idea who owns what cleaning job. Why did we do that?
+
+Well, instead of nested related data inside objects we're going to move them to the appropriate `redux` slice. The `offers` redux slice will serve as a perfect example. We're going to head into that file and make sure that our reducer is listening for any of the actions we just modified. Then we'll extract any offers found in the cleaning jobs returned by those responses and add them to redux state.
+
+In fact, we're going to go ahead and refactor quite a bit of our `offers` redux file. Let's actually start by defining some helper functions inside a new `utils/offers.js` file.
+
+Create that file:
+
+```bash
+touch src/utils/offers.js
+```
+
+And add the following functions to it:
+
+```jsx:title=<span>utils/offers.js</span>
+export const normalizeOffer = (offer) => ({
+  ...offer,
+  user: offer.user?.id ? offer.user.id : offer.user,
+  cleaning: offer.cleaning?.id ? offer.cleaning.id : offer.cleaning
+})
+export const normalizeMultipleOffers = (offers) => offers.map(normalizeOffer)
+
+export const extractOffersFromCleaning = (cleaning) => cleaning.offers
+
+export const extractNormalizedOffersFromCleaning = (cleaning) =>
+  normalizeMultipleOffers(extractOffersFromCleaning(cleaning))
+
+```
+
+We start by creating a few helper functions that will simplify normalizing any offer objects returned from our FastAPI backend. Then, we create a simple selector functions to extract an array of offer objects from a single cleaning job. Finally, we compose those functions into the `extractNormalizedOffersFromCleaning` function that we'll be using the majority of the time.
+
+Our goal will be to take the normalized offer objects extracted from a given cleaning job and then index them by the `id` of the user who created the offer. We'll nest that mapping of `user_id` to offers inside the `id` of the cleaning job that the offers were made for.
+
+Let's create a few other helper functions that will help us accomplish that.
+
+```jsx:title=<span>utils/offers.js</span>
+// ...other code
+
+// create a mapping of `user_id` to the normalized offer
+export const createOffersMapping = (offers) => {
+  return offers.reduce((acc, offer) => {
+    acc[offer.user_id] = offer
+    return acc
+  }, {})
+}
+
+// Take a single cleaning job and generate data needed to update state
+export const createUpdateFromCleaning = (cleaning) => {
+  const normalizedOffers = extractNormalizedOffersFromCleaning(cleaning)
+  return {
+    cleaningId: cleaning.id,
+    offersMapping: createOffersMapping(normalizedOffers)
+  }
+}
+
+// When we have an array of offers and just the cleaningId
+// and need to update state with that data
+export const createUpdateFromOffersAndCleaningId = (offers, cleaningId) => {
+  const normalizedOffers = normalizeMultipleOffers(offers)
+  return {
+    cleaningId,
+    offersMapping: createOffersMapping(normalizedOffers)
+  }
+}
+
+```
+
+The first function - `createOffersMapping` - accepts an array of offers and returns an object that maps the `user_id` property of that offer to the normalized offer itself.
+
+The last two functions - `createUpdateFromCleaning` and `createUpdateFromOffersAndCleaningId` - are almost identical. They both return an object containing the `cleaningId` of the cleaning job that owns the offers, and the mapping of offers made by passing `normalizedOffers` to `createOffersMapping`. The difference is that one function accepts a `cleaning` object itself, while the other accepts an `offers` array and only the `cleaningId` of the cleaning job.
+
+We'll need both of these in our `redux/offers.js` file, so let's get to that refactor next.
+
+The first big change we'll make is to add a new action type that we'll use to make all updates to the `offers` redux slice for offer-specific actions. We'll dispatch that action from the `onSuccess` callback of each `apiClient` request.
+
+Let's see it in action:
+
+The first change we're going to make is to add a new action type
+
+Each of these
+
+```jsx:title=<span>redux/offers.js</span>
+// ...other code
+import {
+  extractNormalizedOffersFromCleaning,
+  createUpdateFromCleaning,
+  createUpdateFromOffersAndCleaningId
+} from "utils/offers"
+
+// ...other code
+
+export const UPDATE_STATE_WITH_OFFERS_FOR_CLEANING =
+  "@@offers/UPDATE_STATE_WITH_OFFERS_FOR_CLEANING"
+
+// ...other code
+
+const updateStateWithOffersForCleaning = (state, offers, cleaningId) => {
+  const update = createUpdateFromOffersAndCleaningId(offers, cleaningId)
+
+  return {
+    ...state,
+    data: {
+      ...state.data,
+      [cleaningId]: {
+        ...(state.data[cleaningId] || {}),
+        ...update.offersMapping,
+      }
+    }
+  }
+}
+
+
+export default function offersReducer(state = initialState.offers, action = {}) {
+  switch (action.type) {
+    // all updates to state.data go through this action now
+    case UPDATE_STATE_WITH_OFFERS_FOR_CLEANING:
+      return updateStateWithOffersForCleaning(state, action.data.offers, action.data.cleaningId)
+
+    // ...other code
+
+    case CREATE_OFFER_FOR_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null
+      }
+
+    // ...other code
+
+    case FETCH_USER_OFFER_FOR_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null
+      }
+
+    // ...other code
+
+    case FETCH_ALL_OFFERS_FOR_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null
+      }
+
+    // ...other code
+
+    default:
+      return state
+  }
+}
+
+```
+
+Alright, let's explore what's changed here:
+
+- The new `UPDATE_STATE_WITH_OFFERS_FOR_CLEANING` is the only action that actually updates the `state.offers.data` object.
+- It uses the `updateStateWithOffersForCleaning` function to actually update state, and that function creates the update using our new `createUpdateFromOffersAndCleaningId` function from the `utils/offers.js` file.
+- All of the success actions **no longer update** `state.offers.data` at all, and instead just set `error` to `null` and `isLoading` to `false`.
+
+But we still need to make sure we dispatch the `UPDATE_STATE_WITH_OFFERS_FOR_CLEANING` action whenever these API calls are successful.
+
+Do that next by updating each of the actions like so:
+
+```jsx:title=<span>redux/offers.js</span>
+// ...other code
+
+export const Actions = {}
+
+Actions.createOfferForCleaning = ({ cleaningId }) => {
+  return (dispatch) => {
+    return dispatch(
+      apiClient({
+        url: `/cleanings/${cleaningId}/offers/`,
+        method: `POST`,
+        types: {
+          REQUEST: CREATE_OFFER_FOR_CLEANING_JOB,
+          SUCCESS: CREATE_OFFER_FOR_CLEANING_JOB_SUCCESS,
+          FAILURE: CREATE_OFFER_FOR_CLEANING_JOB_FAILURE
+        },
+        options: {
+          data: {},
+          params: {}
+        },
+        onSuccess: (res) => {
+          return dispatch({
+            type: UPDATE_STATE_WITH_OFFERS_FOR_CLEANING,
+            offers: [res.data],
+            cleaningId
+          })
+        }
+      })
+    )
+  }
+}
+
+Actions.fetchUserOfferForCleaningJob = ({ cleaningId, username }) => {
+  return (dispatch) => {
+    return dispatch(
+      apiClient({
+        url: `/cleanings/${cleaningId}/offers/${username}/`,
+        method: `GET`,
+        types: {
+          REQUEST: FETCH_USER_OFFER_FOR_CLEANING_JOB,
+          SUCCESS: FETCH_USER_OFFER_FOR_CLEANING_JOB_SUCCESS,
+          FAILURE: FETCH_USER_OFFER_FOR_CLEANING_JOB_FAILURE
+        },
+        options: {
+          data: {},
+          params: {}
+        },
+        onSuccess: (res) => {
+          return dispatch({
+            type: UPDATE_STATE_WITH_OFFERS_FOR_CLEANING,
+            offers: [res.data],
+            cleaningId
+          })
+        }
+      })
+    )
+  }
+}
+
+Actions.fetchAllOffersForCleaningJob = ({ cleaningId }) => {
+  return (dispatch) => {
+    return dispatch(
+      apiClient({
+        url: `/cleanings/${cleaningId}/offers/`,
+        method: `GET`,
+        types: {
+          REQUEST: FETCH_ALL_OFFERS_FOR_CLEANING_JOB,
+          SUCCESS: FETCH_ALL_OFFERS_FOR_CLEANING_JOB_SUCCESS,
+          FAILURE: FETCH_ALL_OFFERS_FOR_CLEANING_JOB_FAILURE
+        },
+        options: {
+          data: {},
+          params: {}
+        },
+        onSuccess: (res) => {
+          return dispatch({
+            type: UPDATE_STATE_WITH_OFFERS_FOR_CLEANING,
+            offers: res.data,
+            cleaningId
+          })
+        }
+      })
+    )
+  }
+}
+
+Actions.acceptUsersOfferForCleaningJob = ({ username, cleaningId }) => {
+  return (dispatch) => {
+    return dispatch(
+      apiClient({
+        url: `/cleanings/${cleaningId}/offers/${username}/`,
+        method: `PUT`,
+        types: {
+          REQUEST: ACCEPT_USERS_OFFER_FOR_CLEANING_JOB,
+          SUCCESS: ACCEPT_USERS_OFFER_FOR_CLEANING_JOB_SUCCESS,
+          FAILURE: ACCEPT_USERS_OFFER_FOR_CLEANING_JOB_FAILURE
+        },
+        options: {
+          data: {},
+          params: {}
+        },
+        onSuccess: (res) => {
+          dispatch(Actions.fetchAllOffersForCleaningJob({ cleaningId }))
+          return { success: true, status: res.status, data: res.data }
+        }
+      })
+    )
+  }
+}
+
+```
+
+Each of the action creator functions now has its own `onSuccess` callback that dispatches our new `UPDATE_STATE_WITH_OFFERS_FOR_CLEANING` with the `id` of the cleaning job and whatever offers were returned from the response.
+
+This is a pretty enormous refactor, but it has reduced the complexity of our reducer a good amount.
+
+Our last order of business here is the one we discussed initially. We'll import the success action types from the cleaning redux file and add any offers found in cleaning jobs there to redux state.
+
+```jsx:title=<span>redux/offers.js</span>
+// ...other code
+import {
+  FETCH_CLEANING_JOB_BY_ID_SUCCESS,
+  UPDATE_CLEANING_JOB_SUCCESS,
+  FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS
+} from "redux/cleanings"
+
+// ...other code
+
+
+function updateStateWithOffersFromCleaning(state, cleaning) {
+  const update = createUpdateFromCleaning(cleaning)
+
+  return {
+    ...state,
+    data: {
+      ...state.data,
+      [update.cleaningId]: {
+        ...(state.data[update.cleaningId] || {}),
+        ...update.offersMapping
+      }
+    }
+  }
+}
+
+function updateStateWithOffersFromMultipleCleanings(state, cleanings) {
+  const updates = cleanings.map(createUpdateFromCleaning)
+
+  // add the new offers to state.data indexed by cleaning id
+  const newData = updates.reduce(
+    (data, update) => {
+      data[update.cleaningId] = {
+        ...(data[update.cleaningId] || {}),
+        ...update.offersMapping
+      }
+      return data
+    },
+    { ...state.data }
+  )
+
+  return {
+    ...state,
+    data: newData
+  }
+}
+
+export default function offersReducer(state = initialState.offers, action = {}) {
+  switch (action.type) {
+    // all updates to state.data go through this action now
+    case UPDATE_STATE_WITH_OFFERS_FOR_CLEANING:
+      return updateStateWithOffersForCleaning(
+        state,
+        action.data.offers,
+        action.data.cleaningId,
+      )
+    // extract offers objects nested within cleaning jobs and add them to our redux store
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return updateStateWithOffersFromCleaning(
+        state,
+        extractNormalizedOffersFromCleaning(action.data)
+      )
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return updateStateWithOffersFromCleaning(
+        state,
+        extractNormalizedOffersFromCleaning(action.data)
+      )
+    case FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS:
+      return updateStateWithOffersFromMultipleCleanings(state, action.data)
+
+    // ...other code
+
+```
+
+With those updates, we can now see our redux store populated with offers whenever we fetch a cleaning job that contains them.
+
+## Composing Complete Cleaning Jobs with Offers Selectors
+
+All that's left is to create selectors used to compose a full cleaning job from state. Add that to the bottom of the `redux/offers.js` file:
+
+```jsx:title=<span>redux/offers.js</span>
+// ...other code
+
+export const selectOffersMappingForCleaning = (state, cleaningId) =>
+  state.offers.data[cleaningId] || {}
+
+export const selectOffersForCleaning = (state, cleaningId) => {
+  const offersMapping = selectOffersMappingForCleaning(state, cleaningId)
+  return Object.values(offersMapping)
+}
+
+export const selectUserOfferForCleaning = (state, cleaningId, userId) => {
+  const offersMapping = selectOffersMappingForCleaning(state, cleaningId)
+  return offersMapping[userId]
+}
+
+
+```
+
+Then, create a new hooks directory for offers and add a `useOffersForCleaningJob` file.
+
+```bash
+mkdir src/hooks/offers
+touch src/hooks/offers/useOffersForCleaningJob.js
+```
+
+Add the following code to it:
+
+```jsx:title=<span>useOffersForCleaningJob.js</span>
+import { useEffect } from "react"
+import { useDispatch, useSelector, shallowEqual } from "react-redux"
+import { useAuthenticatedUser } from "hooks/auth/useAuthenticatedUser"
+import { Actions as cleaningActions } from "redux/cleanings"
+import { selectOffersForCleaning } from "redux/offers" // highlight-line
+import { userIsOwnerOfCleaningJob } from "utils/cleanings"
+
+
+export const useOffersForCleaningJob = (cleaningId) => {
+  const dispatch = useDispatch()
+
+  const { user } = useAuthenticatedUser()
+  const offers = useSelector((state) => selectOffersForCleaning(state, cleaningId), shallowEqual) // highlight-line
+  const cleaningJob = useSelector((state) => state.cleanings.data[cleaningId], shallowEqual)
+  const activeCleaningId = useSelector((state) => state.cleanings.activeCleaningId)
+  const isLoading = useSelector((state) => state.cleanings.isLoading)
+  const isUpdating = useSelector((state) => state.cleanings.isUpdating)
+  const error = useSelector((state) => state.cleanings.error, shallowEqual)
+  const userIsOwner = userIsOwnerOfCleaningJob(cleaningJob, user)
+
+  useEffect(() => {
+    if (cleaningId && !cleaningJob) {
+      dispatch(cleaningActions.fetchCleaningJobById({ cleaningId }))
+    }
+
+    return () => {
+      dispatch(cleaningActions.clearCurrentCleaningJob())
+    }
+  }, [dispatch, cleaningId, cleaningJob])
+
+  return {
+    user,
+    error,
+    offers, // highlight-line
+    isLoading,
+    isUpdating,
+    cleaningJob,
+    userIsOwner,
+    activeCleaningId
+  }
+}
+
+```
+
+And then in the `CleaningJobView` component:
+
+```jsx:title=<span>CleaningJobView.js</span>
+import React from "react"
+import { Routes, Route, useNavigate } from "react-router-dom"
+import { useSingleCleaningJob } from "hooks/cleanings/useSingleCleaningJob"
+import { useOffersForCleaningJob } from "hooks/offers/useOffersForCleaning"
+import {
+  EuiButtonEmpty,
+  EuiButtonIcon,
+  EuiFlexGroup,
+  EuiFlexItem,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiLoadingSpinner,
+  EuiTitle,
+} from "@elastic/eui"
+import {
+  CleaningJobCard,
+  CleaningJobEditForm,
+  CleaningJobOffersTable,
+  NotFoundPage,
+  PermissionsNeeded,
+  UserAvatar,
+} from "components"
+import { useParams } from "react-router-dom"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+`
+const StyledFlexGroup = styled(EuiFlexGroup)`
+  padding: 1rem;
+`
+
+export default function CleaningJobView() {
+  const navigate = useNavigate()
+  const { cleaningId } = useParams()
+  const {
+    user,
+    // error,
+    cleaningJob,
+    isLoading,
+    // isUpdating,
+    activeCleaningId,
+    userIsOwner,
+  } = useSingleCleaningJob(cleaningId)
+  const {
+    offers,
+    offersIsLoading,
+    handleAcceptOffer,
+    createOfferForCleaning,
+    userOfferForCleaningJob,
+  } = useOffersForCleaningJob()
+
+  if (isLoading) return <EuiLoadingSpinner size="xl" />
+  if (!cleaningJob && activeCleaningId !== cleaningId) return <NotFoundPage />
+
+  const editJobButton = userIsOwner ? (
+    <EuiButtonIcon iconType="documentEdit" aria-label="edit" onClick={() => navigate(`edit`)} />
+  ) : null
+  const goBackButton = (
+    <EuiButtonEmpty iconType="sortLeft" size="s" onClick={() => navigate(`/cleaning-jobs/${cleaningJob.id}`)}>
+      back to job
+    </EuiButtonEmpty>
+  )
+
+  const viewCleaningJobElement = (
+    <CleaningJobCard
+      offersIsLoading={offersIsLoading}
+      cleaningJob={cleaningJob}
+      isOwner={userIsOwner}
+      createOfferForCleaning={null}
+      userOfferForCleaningJob={null}
+    />
+  )
+  const editCleaningJobElement = (
+    <PermissionsNeeded element={<CleaningJobEditForm cleaningId={cleaningId} />} isAllowed={userIsOwner} />
+  )
+
+  const cleaningJobOffersTableElement = userIsOwner ? (
+    <CleaningJobOffersTable offers={offers} handleAcceptOffer={null} offersIsLoading={null} />
+  ) : null
+
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <EuiPageContent verticalPosition="center" horizontalPosition="center" paddingSize="none">
+          <StyledFlexGroup alignItems="center" direction="row" responsive={false}>
+            <EuiFlexItem>
+              <EuiFlexGroup justifyContent="flexStart" alignItems="center" direction="row" responsive={false}>
+                <EuiFlexItem grow={false}>
+                  <UserAvatar size="xl" user={userIsOwner ? user : cleaningJob.owner} intialsLength={2} />
+                </EuiFlexItem>
+                <EuiFlexItem>
+                  <EuiTitle>
+                    <p>@{userIsOwner ? user.username : cleaningJob.owner?.username}</p>
+                  </EuiTitle>
+                </EuiFlexItem>
+              </EuiFlexGroup>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <Routes>
+                <Route path="/" element={editJobButton} />
+                <Route path="/edit" element={goBackButton} />
+              </Routes>
+            </EuiFlexItem>
+          </StyledFlexGroup>
+
+          <EuiPageContentBody>
+            <Routes>
+              <Route path="/" element={viewCleaningJobElement} />
+              <Route path="/edit" element={editCleaningJobElement} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </EuiPageContentBody>
+        </EuiPageContent>
+
+        <Routes>
+          <Route path="/" element={cleaningJobOffersTableElement} />
+        </Routes>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+```
+
+Alright, with the offers normalized, we can then finish this post up by normalizing the user profiles attached to the resources sent by our FastAPI backend.
+
+## Normalizing User profiles
+
+We'll start by creating a new `users` redux slice, making sure to include some starter data in `redux/initialState.js`.
+
+```jsx:title=<span>redux/initialState.js</span>
+export default {
+  auth: {
+    isLoading: false,
+    isUpdating: false,
+    isAuthenticated: false,
+    error: null,
+    userLoaded: false,
+    user: {}
+  },
+  cleanings: {
+    isLoading: false,
+    isUpdating: false,
+    error: null,
+    data: {},
+    activeCleaningId: null
+  },
+  offers: {
+    isLoading: false,
+    isUpdating: false,
+    error: null,
+    data: {}
+  },
+  feed: {
+    isLoading: false,
+    error: null,
+    data: {},
+    hasNext: {}
+  },
+  ui: {
+    toastList: []
+  },
+  users: { // highlight-line
+    error: null, // highlight-line
+    isLoading: false, // highlight-line
+    data: {} // highlight-line
+  } // highlight-line
+}
+
+```
+
+And create a new file for our `users` redux slice:
+
+```bash
+touch src/redux/users.js
+```
+
+Then add code for a new reducer that will handle any of the cleaning actions that include user profiles:
+
+```jsx:title=<span>redux/users.js</span>
+import initialState from "redux/initialState"
+import { REQUEST_LOG_USER_OUT } from "redux/auth"
+import {
+  FETCH_CLEANING_JOB_BY_ID_SUCCESS,
+  UPDATE_CLEANING_JOB_SUCCESS,
+  FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS
+} from "redux/cleanings"
+import { extractUsersFromCleaning, extractUsersFromMultipleCleanings } from "utils/users"
+
+const updateStateWithUserProfiles = (state, users) => {
+  const usersMapping = users.reduce((acc, user) => {
+    acc[user.id] = user
+    return acc
+  }, {})
+
+  return {
+    ...state,
+    data: {
+      ...state.data,
+      ...usersMapping
+    }
+  }
+}
+
+export default function usersReducer(state = initialState.users, action = {}) {
+  switch (action.type) {
+    /* CLEANING ACTIONS */
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return updateStateWithUserProfiles(state, extractUsersFromCleaning(action.data))
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return updateStateWithUserProfiles(state, extractUsersFromCleaning(action.data))
+    case FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS:
+      return updateStateWithUserProfiles(state, extractUsersFromMultipleCleanings(action.data))
+    /* AUTH ACTIONS */
+    case REQUEST_LOG_USER_OUT:
+      return initialState.cleanings
+    default:
+      return state
+  }
+}
+
+export const selectUserById = (state, userId) => state.users.data[userId]
+export const selectOwnerOfNormalizedCleaning = (state, normalizedCleaning) =>
+  selectUserById(state, normalizedCleaning?.owner)
+
+```
+
+Here we accomplish three things:
+
+- Create a dedicated redux slice for user profiles so that we can properly normalize all resources sent by our FastAPI backend.
+- Listen for any actions that include cleaning resources so that we can extract users from them and store them in redux.
+- Define selector functions used to fetch the user profile associated with a normalized cleaning so that they can be reconstructed appropriately in our UI.
+
+There are two utility functions that we're expecting to exist but have yet to create. Their purpose will be to extract any users from
+
+Let's go ahead and do that now.
+
+Touch a new file called `utils/users.js`.
+
+```bash
+touch src/utils/users.js
+```
+
+And add the following code to it:
+
+```jsx:title=<span>utils/users.js</span>
+export const extractUsersFromOffer = (offer) => (offer.user?.id ? [offer.user] : [])
+
+export const extractUsersFromMultipleOffers = (offers) =>
+  (offers ?? []).map((offer) => extractUsersFromOffer(offer)).flat()
+
+export const extractUsersFromCleaning = (cleaning) => {
+  // extract all users from each offer
+  const users = extractUsersFromMultipleOffers(cleaning?.offers ?? [])
+  // extract cleaning owner if needed
+  if (cleaning?.owner?.id) {
+    users.push(cleaning.owner)
+  }
+
+  return users
+}
+
+export const extractUsersFromMultipleCleanings = (cleanings) => {
+  return (cleanings ?? []).map((cleaning) => extractUsersFromCleaning(cleaning)).flat()
+}
+
+```
+
+The `extractUsersFromMultipleCleanings` and `extractUsersFromCleaning` functions expect to receive cleaning jobs sent by our FastAPI backend and return an array of user objects that we can index in our `users` slice. Those users objects may come from the owner of the cleaning or from the user who sent an offer for that cleaning job.
+
+Last, but not least, let's define a few additional selectors to provide a mechanism for fetching offers and cleaning resources populated with the appropriate users.
+
+Open up the `redux/offers.js` file and make the following updates:
+
+```jsx:title=<span>redux/offers.js</span>
+// ...other code
+
+import { selectUserForNormalizedOffer } from "redux/users" // highlight-line
+
+// ...other code
+
+export const selectOffersMappingForCleaning = (state, cleaningId) =>
+  state.offers.data[cleaningId] || {}
+
+export const selectOffersForCleaning = (state, cleaningId) => {
+  const offersMapping = selectOffersMappingForCleaning(state, cleaningId)
+  return Object.values(offersMapping)
+}
+
+// highlight-start
+export const selectPopulatedOffersForCleaning = (state, cleaningId) => {
+  const offersForCleaning = selectOffersForCleaning(state, cleaningId)
+  return offersForCleaning.map((offer) => ({
+    ...offer,
+    user: selectUserForNormalizedOffer(state, offer)
+  }))
+}
+// highlight-end
+
+export const selectUserOfferForCleaning = (state, cleaningId, userId) => {
+  const offersMapping = selectOffersMappingForCleaning(state, cleaningId)
+  return offersMapping[userId]
+}
+
+```
+
+The `selectPopulatedOffersForCleaning` function builds upon our previous selector by mapping over the offers for a particular cleaning job and using the `selectUserForNormalizedOffer` to attach the appropriate user object back to the offer.
+
+Now in the `redux/cleanings.js` file, define a couple selectors:
+
+```jsx:title=<span>redux/cleanings.js</span>
+// ...other code
+
+// ...other code
+
+
+export const selectNormalizedCleaningJobById = (state, cleaningId) =>
+  state.cleanings.data[cleaningId]
+
+export const selectPopulatedCleaningJobById = (state, cleaningId) => {
+  const normalizedCleaning = selectNormalizedCleaningJobById(state, cleaningId)
+  if (normalizedCleaning) {
+    return {
+      ...normalizedCleaning,
+      owner: selectOwnerOfNormalizedCleaning(state, normalizedCleaning)
+    }
+  }
+}
+
+```
+
+<!-- make sure that any hook that selects a cleaning resource or offer gets the appropriate user added back in the right location. -->
+
+<!--
+
+
+
+
+END OF CURRENT STATE
+
+
+
+
+
+
+
+
+-->
+
+we're going to make sure that our `offers` redux slice is listening for
+
+We'll replace all the offers for a cleaning job with an `id`. Then, we'll refactor the `CREATE_CLEANING_JOB_SUCCESS`, `FETCH_CLEANING_JOB_BY_ID_SUCCESS`, and `UPDATE_CLEANING_JOB_SUCCESS` actions to use the same normalizing function. We'll want to change the FETCH_CLEANING_JOB_BY_ID to just use an id as the determining metric and keep the cleaning job in `state.cleaning.data` like the rest of them.
+
+We want to make sure that any time we need to populate a cleaning job with offers made for that job
+
+Then we'll write a new test case called `TestPopulatedCleanings`
+
+Make sure to pull in the offers repo into the cleanings repo.
+
+Add a populate param to the `list_all_user_cleanings` method in the `cleanings` repo. Add a `populate_offers` param to the `populate_cleaning` method and use it to grab all offers for the cleaning being requested.
+
+Then the `populate_cleaning` method calls the offers_repo's `list_offers_for_cleaning` method if `populate_offers` is true, otherwise it defaults to an empty list.
+
+We'll need to update the tests some more.
+
+The `test_get_all_cleanings_returns_only_user_owned_cleanings` will need to parse the cleanings as `CleaningPublic` model now that they're being populated by default. We also have to update the rest of the test since we're comparing `CleaningInDB` models to `CleaningPublic` models.
+
+## Fetching All Offers For User-Owned Cleaning Jobs
+
+<!--
+
+
+
+
+
+
+
+
+
+-->
+
+### Circular Import Problem
+
+- Introduce the well-documented problem with circular imports for Pydantic models
+  - https://github.com/samuelcolvin/pydantic/issues/707
+  - https://github.com/samuelcolvin/pydantic/discussions/2395
+  - https://github.com/samuelcolvin/pydantic/issues/1873
+  - https://pydantic-docs.helpmanual.io/usage/postponed_annotations/#self-referencing-models
+
+Problem is as the last issue states:
+
+> But the solution is quite counterintuitive, so we we need to modify m1.py while import error happens in m2.py, and if there are more models, with some graph of dependencies, things goes more complicated, not sure we can handle three or more models this way. Also placing import in the bottom of the file violates PEP-8.
+
+Start by showing the approach that looks like this:
+
+```python
+from __future__ import annotations
+
+# ...other code
+
+class CleaningPublic(CleaningInDB):
+    owner: Union[int, UserPublic]
+    offers: Optional[List[OfferPublic]] = []
+
+
+from app.models.offer import OfferPublic
+
+CleaningPublic.update_forward_refs()
+
+```
+
+And maybe even show the string version of it.
+
+Then discuss that it violates PEP-8 and is probably inefficient.
+
+Instead, we'll refactor and remove the cleanings attribute from offers.
+
+### Updating the Cleanings Repo and Cleanings Tests
+
+Then, once we add the offers list to CleaningPublic, we'll need to update the repository to exclude "offers" when updating the cleaning model.
+
+We also need to update the get cleaning by id test to ignore offers.
+
+Then we'll write a new test case called `TestPopulatedCleanings`
+
+Make sure to pull in the offers repo into the cleanings repo.
+
+Add a populate param to the `list_all_user_cleanings` method in the `cleanings` repo. Add a `populate_offers` param to the `populate_cleaning` method and use it to grab all offers for the cleaning being requested.
+
+Then the `populate_cleaning` method calls teh offers_repo's `list_offers_for_cleaning` method if `populate_offers` is true, otherwise it defaults to an empty list.
+
+We'll need to update the tests some more.
+
+The `test_get_all_cleanings_returns_only_user_owned_cleanings` will need to parse the cleanings as `CleaningPublic` model now that they're being populated by default. We also have to update the rest of the test since we're comparing `CleaningInDB` models to `CleaningPublic` models.
+
+### Adding One More Test Class For Good Measure
+
+```python
+from typing import List, Dict, Union, Optional, Callable
+
+# ...other code
+
+class TestPopulatedCleanings:
+    async def test_when_user_fetches_their_own_cleanings_they_come_populated_with_offers(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user_list: List[UserInDB],
+        test_list_of_cleanings_with_pending_offers: List[CleaningInDB],
+    ) -> None:
+        test_user_ids = [u.id for u in test_user_list]
+        test_cleaning_ids = [c.id for c in test_list_of_cleanings_with_pending_offers]
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.get(app.url_path_for("cleanings:list-all-user-cleanings"))
+        assert res.status_code == status.HTTP_200_OK
+
+        cleanings = [CleaningPublic(**c) for c in res.json()]
+        for c in cleanings:
+            if c.id in test_cleaning_ids:
+                assert len(c.offers) == len(test_user_list)
+                for offer in c.offers:
+                    assert offer.user_id in test_user_ids
+```
+
+## Back to the offers React stuff
+
+Start creating this one and realize we're going to need some cleaning specific data about offers.
+
+So then create an `useOffersForCleaningJob` hook that grabs all the offers for a particular cleaning job and creates the appropriate action handlers
+
+- Fix the CleaningJobCard
+  - Add back the offers
+  - Add user's own profile if they're the owner
+
+```jsx
+<EuiFlexGroup justifyContent="flexStart" alignItems="center" direction="row" responsive={false}>
+  <EuiFlexItem grow={false}>
+    <UserAvatar
+      size="xl"
+      user={userIsOwner ? user : cleaningJob.owner} // highlight-line
+      intialsLength={2}
+    />
+  </EuiFlexItem>
+  <EuiFlexItem>
+    <EuiTitle>
+      <p>@{userIsOwner ? user.username : cleaningJob.owner?.username}</p> // highlight-line
+    </EuiTitle>
+  </EuiFlexItem>
+</EuiFlexGroup>
+```
+
+### Normalizing our Redux data
+
+First we start by normalizing the cleaning jobs returned in our `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS` with a `normalizeCleanings` util in the `utils/cleanings` file. We replace all the offers for a cleaning job with an `id`. Then, we'll refactor the `CREATE_CLEANING_JOB_SUCCESS`, `FETCH_CLEANING_JOB_BY_ID_SUCCESS`, and `UPDATE_CLEANING_JOB_SUCCESS` actions to use the same normalizing function. We'll want to change the FETCH_CLEANING_JOB_BY_ID to just use an id as the determining metric and keep the cleaning job in `state.cleaning.data` like the rest of them.
+
+### Normalize Offers By Extracting Them From Cleanings and Adding Them To Redux state
+
+Then we'll use simple redux selectors to access those values from state and compose the proper data into what we need.
+
+### Create a Dashboard Page
+
+### Create a `useUserOwnedCleanings` hook
+
+### Redirect the user to their dashboard upon successful auth instead of their profile page.
+
+<!--
+
+
+
+
+EVERYTHING BEYOND IS OLD STUFF
+
+
+
+
+
+
+
+
+-->
+
+## Updating the cleanings redux slice
+
+Currently, the process by which we manage and view individual cleaning jobs is clunky. We're going to clean up our `redux/cleanings.js` file a bit and then follow the pattern we adopted in our last post, moving logic out of components and into custom hooks.
+
+Before we begin, tweak the `redux/initialState.js` file slightly.
+
+```jsx:title=<span>redux/initialState.js</span>
+export default {
+  auth: {
+    isLoading: false,
+    isUpdating: false,
+    isAuthenticated: false,
+    error: null,
+    userLoaded: false,
+    user: {}
+  },
+  cleanings: {
+    isLoading: false,
+    isUpdating: false,
+    error: null,
+    data: {},
+    activeCleaningId: null  // highlight-line
+  },
+  offers: {
+    isLoading: false,
+    isUpdating: false,
+    error: null,
+    data: {}
+  },
+  feed: {
+    isLoading: false,
+    error: null,
+    data: {},
+    hasNext: {}
+  },
+  ui: {
+    toastList: []
+  }
+}
+
+```
+
+Just a one line change that precludes what's to come in our `redux` refactor.
+
+Ok, now let's pop open that `redux/cleanings.js` file and make a few changes.
+
+```jsx:title=<span>redux/cleanings.js</span>
+// highlight-start
+import initialState from "redux/initialState"
+import { REQUEST_LOG_USER_OUT } from "redux/auth"
+import apiClient from "services/apiClient"
+// highlight-end
+
+// ...other code
+
+export default function cleaningsReducer(state = initialState.cleanings, action = {}) {
+  switch (action.type) {
+    case FETCH_CLEANING_JOB_BY_ID:
+      return {
+        ...state,
+        isLoading: true
+      }
+		// highlight-start
+    case FETCH_CLEANING_JOB_BY_ID_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: action.data,
+        },
+        activeCleaningId: action.data.id,
+      }
+    case FETCH_CLEANING_JOB_BY_ID_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        error: action.error,
+      }
+		case CLEAR_CURRENT_CLEANING_JOB:
+			return {
+				...state,
+				activeCleaningId: null,
+			}
+		// highlight-end
+
+		// ...other code
+
+		// highlight-start
+    case UPDATE_CLEANING_JOB_SUCCESS:
+      return {
+        ...state,
+        isUpdating: false,
+        error: null,
+        data: {
+          ...state.data,
+          [action.data.id]: action.data,
+        }
+      }
+		// highlight-end
+
+		// ...other code
+
+    default:
+      return state
+  }
+}
+
+export const Actions = {}
+
+Actions.clearCurrentCleaningJob = () => ({ type: CLEAR_CURRENT_CLEANING_JOB })
+
+Actions.createCleaningJob = ({ newCleaning }) => {  // highlight-line
+  return apiClient({
+    url: `/cleanings/`,
+    method: `POST`,
+    types: {
+      REQUEST: CREATE_CLEANING_JOB,
+      SUCCESS: CREATE_CLEANING_JOB_SUCCESS,
+      FAILURE: CREATE_CLEANING_JOB_FAILURE
+    },
+    options: {
+      data: { new_cleaning: newCleaning },  // highlight-line
+      params: {}
+    }
+  })
+}
+
+Actions.fetchCleaningJobById = ({ cleaningId }) => { // highlight-line
+  return apiClient({
+    url: `/cleanings/${cleaningId}/`, // highlight-line
+    method: `GET`,
+    types: {
+      REQUEST: FETCH_CLEANING_JOB_BY_ID,
+      SUCCESS: FETCH_CLEANING_JOB_BY_ID_SUCCESS,
+      FAILURE: FETCH_CLEANING_JOB_BY_ID_FAILURE
+    },
+    options: {
+      data: {},
+      params: {}
+    }
+  })
+}
+
+Actions.updateCleaningJob = ({ cleaningId, cleaningUpdate }) => { // highlight-line
+  return apiClient({
+    url: `/cleanings/${cleaningId}/`, // highlight-line
+    method: `PUT`,
+    types: {
+      REQUEST: UPDATE_CLEANING_JOB,
+      SUCCESS: UPDATE_CLEANING_JOB_SUCCESS,
+      FAILURE: UPDATE_CLEANING_JOB_FAILURE
+    },
+    options: {
+      data: { cleaning_update: cleaningUpdate }, // highlight-line
+      params: {}
+    }
+  })
+}
+
+// ...other code
+
+```
+
+All of the updates to our action creator functions are simply cosmetic. Mixing snake case and camel case is usually not a good idea as it makes for an inconsistent api. Now, tools like VS code will handle autocompletion for us. Even so, it's good practice to stick with standard JavaScript snake case until we need to actually pass camel case parameters to our FastAPI backend. So we've converted parameters like `cleaning_id` to `cleaningId`.
+
+The other changes we've made are in the `cleaningsReducer`. We are also standardizing how we handle receiving cleaning resources from our FastAPI server, which is a much needed change. We'll be keeping all jobs indexed by id inside the `data` key, creating a simple lookup table when we need to access a particular resource. On top of that, we're simply storing the active id of any successfully fetched cleaning job and caching it in `activeCleaningId`. Any clunky update logic has been replace as well. All of these changes will break things as they currently stand, but that's ok. We'll fix them in a minute.
+
+Oh yeah, we also switched to absolute imports here as well. All is well at the moment.
+
+Next up is creating a new custom hook that we'll use to manage any individual cleaning resource.
+
+## The useSingleCleaningJob Hook
+
+Go ahead and create a new directory inside our hooks folder called `cleanings`. Add a new file to it called `useSingleCleaningJob.js`.
+
+```bash
+mkdir src/hooks/cleanings
+touch src/hooks/cleanings/useSingleCleaningJob.js
+```
+
+While we're at it, let's also create a new file in the `utils` directory called `cleanings.js`. Over the next couple steps we'll be putting a few helper methods to good use. Now is as good a time as ever to start adding code there.
+
+```bash
+touch src/utils/cleanings.js
+```
+
+First things first, add the following code to the `useSingleCleaningJob.js` file:
+
+```jsx:title=<span>useSingleCleaningJob.js</span>
+import { useEffect } from "react"
+import { useDispatch, useSelector, shallowEqual } from "react-redux"
+import { useAuthenticatedUser } from "hooks/auth/useAuthenticatedUser"
+import { Actions as cleaningActions } from "redux/cleanings"
+import { userIsOwnerOfCleaningJob } from "utils/cleanings"
+
+export const useSingleCleaningJob = (cleaningId) => {
+  const dispatch = useDispatch()
+
+  const { user } = useAuthenticatedUser()
+  const cleaningJob = useSelector((state) => state.cleanings.data[cleaningId], shallowEqual)
+	const activeCleaningId = useSelector((state) => state.cleanings.activeCleaningId)
+  const isLoading = useSelector((state) => state.cleanings.isLoading)
+  const isUpdating = useSelector((state) => state.cleanings.isUpdating)
+  const error = useSelector((state) => state.cleanings.error, shallowEqual)
+  const userIsOwner = userIsOwnerOfCleaningJob(cleaningJob, user)
+
+  useEffect(() => {
+    if (cleaningId && !cleaningJob) {
+      dispatch(cleaningActions.fetchCleaningJobById({ cleaningId }))
+    }
+
+    return () => {
+      dispatch(cleaningActions.clearCurrentCleaningJob())
+    }
+  }, [dispatch, cleaningId, cleaningJob])
+
+  return {
+    error,
+    isLoading,
+    isUpdating,
+    cleaningJob,
+    userIsOwner,
+		activeCleaningId,
+  }
+}
+
+```
+
+A few things to take note of here.
+
+At the top of the file we're importing some standard `redux` stuff and a yet-to-be-created function called `userIsOwnerOfCleaningJob`. Its job is self-explanatory. We should be able to pass it a user object and a cleaning object, and we should get back a boolean indicating whether or not that user owns the cleaning resource in question. We're also importing the `useAuthenticatedUser` hook that we defined in our previous post. Once again, centralizing our app's auth logic in this hook is proving fruitful.
+
+The `useSingleCleaningJob` function takes in a single parameter, the id of the cleaning job. We then use that id in two places.
+
+First, we pull the cleaning job from the `cleanings` slice of our `redux` state tree. We also grab the `isLoading` and `isUpdating` flags, along with any errors. We then pass both the cleaning job and the user returned by our `useAuthenticatedUser` hook into the `userIsOwnerOfCleaningJob` utility function to determin the value of the `userIsOwner` boolean.
+
+Finally, we run a `useEffect` hook that checks if the `cleaningId` is valid and that we don't already have a `cleaningJob` in state. If both these conditions are met, we dispatch the `fetchCleaningJobById` action creator and request the cleaning resource from our FastAPI backend.
+
+At the end, we return all relevant data that consumers of this hook might need.
+
+All that's left is to implement the `userIsOwnerOfCleaningJob` function.
+
+```jsx:title=<span>utils/cleanings.js</span>
+export const userIsOwnerOfCleaningJob = (cleaning, user) => {
+  if (cleaning?.owner?.id === user?.id) return true
+  if (cleaning?.owner === user?.id) return true
+  return false
+}
+
+```
+
+Three situations are being accounted for here.
+
+- When the function is provided a cleaning job where the owner is a user object, we compare the id of the owner with the id of the user passed to the function. If they match, we return `true`.
+- When the cleaning job has an owner property that is only an id, we simply compare that to the id of the user and return `true` if they match.
+- If neither of the two previous situations match, or if `null` or `undefined` is passed in for either the `cleaning` or `user` parameters, none of the conditions will match and the function simply returns `false`.
+
+Now onto the tricky part. We'll need to update any component that depends on accessing a single cleaning job from `redux`.
+
+Before we do anything else, make a small change to the `CleaningJobsPage.js` component.
+
+```jsx:title=<span>CleaningJobsPage.js</span>
+import React from "react"
+import { Routes, Route } from "react-router-dom"
+import { CleaningJobsHome, CleaningJobView, NotFoundPage } from "components"
+
+export default function CleaningJobsPage() {
+  return (
+    <>
+      <Routes>
+        <Route path="/" element={<CleaningJobsHome />} />
+        <Route path=":cleaningId/*" element={<CleaningJobView />} />  // highlight-line
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </>
+  )
+}
+
+```
+
+Here we're specifying the route param as `cleaningId` instead of `cleaning_id`. Again, we're simply staying consistent with our variable casing.
+
+Next, open up the `CleaningJobView` component and update it like so:
+
+```jsx:title=<span>CleaningJobView.js</span>
+import React from "react"
+import { Routes, Route, useNavigate } from "react-router-dom"
+import { useSingleCleaningJob } from "hooks/cleanings/useSingleCleaningJob"
+import {
+  EuiButtonEmpty,
+  EuiButtonIcon,
+  EuiFlexGroup,
+  EuiFlexItem,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiLoadingSpinner,
+  EuiTitle
+} from "@elastic/eui"
+import {
+  CleaningJobCard,
+  CleaningJobEditForm,
+  CleaningJobOffersTable,
+  NotFoundPage,
+  PermissionsNeeded,
+  UserAvatar
+} from "components"
+import { useParams } from "react-router-dom"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+`
+const StyledFlexGroup = styled(EuiFlexGroup)`
+  padding: 1rem;
+`
+
+export default function CleaningJobView() {
+  const navigate = useNavigate()
+  const { cleaningId } = useParams()
+  const {
+    cleaningJob,
+		error,
+    isLoading,
+    isUpdating,
+    activeCleaningId,
+    userIsOwner
+  } = useSingleCleaningJob(cleaningId)
+
+  if (isLoading) return <EuiLoadingSpinner size="xl" />
+  if (!cleaningJob && activeCleaningId !== cleaningId) return <NotFoundPage />
+
+  const editJobButton = userIsOwner ? (
+    <EuiButtonIcon iconType="documentEdit" aria-label="edit" onClick={() => navigate(`edit`)} />
+  ) : null
+  const goBackButton = (
+    <EuiButtonEmpty
+      iconType="sortLeft"
+      size="s"
+      onClick={() => navigate(`/cleaning-jobs/${cleaningJob.id}`)}
+    >
+      back to job
+    </EuiButtonEmpty>
+  )
+
+  const viewCleaningJobElement = (
+    <CleaningJobCard
+      offersIsLoading={null}
+      cleaningJob={cleaningJob}
+      isOwner={userIsOwner}
+      createOfferForCleaning={null}
+      userOfferForCleaningJob={null}
+    />
+  )
+  const editCleaningJobElement = (
+    <PermissionsNeeded
+      element={<CleaningJobEditForm cleaningId={cleaningId} />}
+      isAllowed={userIsOwner}
+    />
+  )
+
+  const cleaningJobOffersTableElement = userIsOwner ? (
+    <CleaningJobOffersTable offers={[]} handleAcceptOffer={null} offersIsLoading={null} />
+  ) : null
+
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <EuiPageContent verticalPosition="center" horizontalPosition="center" paddingSize="none">
+          <StyledFlexGroup alignItems="center" direction="row" responsive={false}>
+            <EuiFlexItem>
+              <EuiFlexGroup
+                justifyContent="flexStart"
+                alignItems="center"
+                direction="row"
+                responsive={false}
+              >
+                <EuiFlexItem grow={false}>
+                  <UserAvatar size="xl" user={cleaningJob.owner} intialsLength={2} />
+                </EuiFlexItem>
+                <EuiFlexItem>
+                  <EuiTitle>
+                    <p>@{cleaningJob.owner?.username}</p>
+                  </EuiTitle>
+                </EuiFlexItem>
+              </EuiFlexGroup>
+            </EuiFlexItem>
+            <EuiFlexItem grow={false}>
+              <Routes>
+                <Route path="/" element={editJobButton} />
+                <Route path="/edit" element={goBackButton} />
+              </Routes>
+            </EuiFlexItem>
+          </StyledFlexGroup>
+
+          <EuiPageContentBody>
+            <Routes>
+              <Route path="/" element={viewCleaningJobElement} />
+              <Route path="/edit" element={editCleaningJobElement} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </EuiPageContentBody>
+        </EuiPageContent>
+
+        <Routes>
+          <Route path="/" element={cleaningJobOffersTableElement} />
+        </Routes>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+
+```
+
+Compared to what this component looked like before, this is a signficant upgrade. To be fair, we've left out anything having to do with offers, so we've added a number of `null` and empty array values to children of this component. Once we start handling fetching offers for a single cleaning job, we'll update these values.
+
+We're no longer using any `redux` related code directly in the component. Everything we need comes directly from our `useSingleCleaningJob` hook and is passed to the components that need them. Both the `CleaningJobCard` and `CleaningJobEditForm` use the same cleaning job, so we pass the `cleaningJob` object and `isOwner` boolean to the `CleaningJobCard` component and `cleaningId` to the `CleaningJobEditForm` component. At the moment, `CleaningJobEditForm` has its own logic on how to use that id to render its form properly, but that could probably be improved.
+
+In fact, it would probably make sense to extract all of the logic within the `CleaningJobEditForm` into its own hook. Why don't we do that now?
+
+Befor we move on, here's a codesandbox with all the code we've written up to this point:
+
+<CodesandboxDisplay
+  codesandboxLink={
+    "https://codesandbox.io/s/phresh-frontend-part-11-the-usesinglecleaningjob-hook-y4gqe?file=/src/components/CleaningJobView/CleaningJobView.js"
+  }
+  codesandboxProps={{
+    src:
+      "https://codesandbox.io/embed/phresh-frontend-part-11-the-usesinglecleaningjob-hook-y4gqe?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-11-the-useSingleCleaningJob-hook",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+Check to make sure everything is in order.
+
+Once that's done, we'll get to building our `useCleaningJobForm` hook.
+
+## The useCleaningJobForm hook
+
+Go ahead and create a new file:
+
+```bash
+touch src/hooks/ui/useCleaningJobForm.js
+```
+
+Could this file have gone in the `hooks/cleanings` directory? Sure. But it's really more UI related, so we're placing it there instead.
+
+Since the same fields are being used by the `CleaningJobCreateForm` and `CleaningJobEditForm` components, we'll design our hook to support both cases. As was the case with our `LoginForm` and `RegistrationForm`, there's quite a bit of shared logic between the two. Fortunately, we won't need to differentiate between the two situations explicitly like we did with our authentication form. We'll just use a `cleaningId` to determine the form's specifics.
+
+Here's how we'll do it.
+
+```jsx:title=<span>useCleaningJobForm.js</span>
+import React, { useState, Fragment, useEffect } from "react"
+import { useSingleCleaningJob } from "hooks/cleanings/useSingleCleaningJob"
+import { EuiText } from "@elastic/eui"
+import { extractErrorMessages } from "utils/errors"
+import validation from "utils/validation"
+
+const cleaningTypeOptions = [
+  {
+    value: "dust_up",
+    inputDisplay: "Dust Up",
+    dropdownDisplay: (
+      <Fragment>
+        <strong>Dust Up</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A minimal clean job. Dust shelves and mantels, tidy rooms, and sweep floors.
+          </p>
+        </EuiText>
+      </Fragment>
+    ),
+  },
+  {
+    value: "spot_clean",
+    inputDisplay: "Spot Clean",
+    dropdownDisplay: (
+      <Fragment>
+        <strong>Spot Clean</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A standard clean job. Vacuum all indoor spaces, sanitize surfaces, and disinfect targeted areas. Bathrooms,
+            tubs, and toilets can be added on for an additional charge.
+          </p>
+        </EuiText>
+      </Fragment>
+    ),
+  },
+  {
+    value: "full_clean",
+    inputDisplay: "Deep Clean",
+    dropdownDisplay: (
+      <Fragment>
+        <strong>Deep Clean</strong>
+        <EuiText size="s" color="subdued">
+          <p className="euiTextColor--subdued">
+            A complete clean job. Mop tile floors, scrub out tough spots, and a guaranteed clean residence upon
+            completion. Dishes, pots, and pans included in this package.
+          </p>
+        </EuiText>
+      </Fragment>
+    ),
+  },
+]
+
+export const useCleaningJobForm = (cleaningId) => {
+  const { cleaningJob, isLoading, isUpdating, error } = useSingleCleaningJob(cleaningId)
+
+  const [form, setForm] = useState({
+    name: cleaningJob?.name || "",
+    description: cleaningJob?.description || "",
+    price: cleaningJob?.price || "",
+    cleaning_type: cleaningJob?.cleaning_type || cleaningTypeOptions[0].value,
+  })
+  const [errors, setErrors] = useState({})
+  const [hasSubmitted, setHasSubmitted] = useState(false)
+  const cleaningErrorList = extractErrorMessages(error)
+
+  useEffect(() => {
+    if (cleaningJob) {
+      setForm((form) => ({ ...cleaningJob }))
+    }
+  }, [cleaningJob])
+
+  const validateInput = (label, value) => {
+    const isValid = validation?.[label] ? validation?.[label]?.(value) : true
+    setErrors((errors) => ({ ...errors, [label]: !isValid }))
+  }
+
+  const onInputChange = (label, value) => {
+    validateInput(label, value)
+    setForm((state) => ({ ...state, [label]: value }))
+  }
+
+  const onCleaningTypeChange = (cleaning_type) => {
+    setForm((state) => ({ ...state, cleaning_type }))
+  }
+
+  const getFormErrors = () => {
+    const formErrors = []
+
+    if (errors.form) {
+      formErrors.push(errors.form)
+    }
+
+    if (hasSubmitted && cleaningErrorList.length) {
+      return formErrors.concat(cleaningErrorList)
+    }
+
+    return formErrors
+  }
+
+  return {
+    form,
+    setForm,
+    errors,
+    isLoading,
+    isUpdating,
+    hasSubmitted,
+    getFormErrors,
+    setHasSubmitted,
+    onInputChange,
+    validateInput,
+    onCleaningTypeChange,
+    cleaningTypeOptions,
+  }
+}
+
+```
+
+This hook is much larger in size, but is actually very similar to our `useLoginAndRegistrationForm` hook. The main difference is that we have some shared UI used in the cleaning type dropdown. Right beneath the imports, we have the `cleaningTypeOptions` array which we have extracted from both components and placed here. With this one simple change, we've already removed 45 lines of code from our app with no reduction in functionality. That's a win.
+
+We also take advantage of our freshly minted `useSingleCleaningJob` hook. The `useCleaningJobForm` takes in a single parameter - `cleaningId` - and passes it to `useSingleCleaningJob` to gain access to any currently existing cleaning jobs with that id. If the id doesn't exist, then no cleaning job will be returned. No harm no foul.
+
+However, notice that our form state defaults to all the attributes of the `cleaningJob`, if it exists. In the case that no cleaning is present, we use empty strings and the first value in the `cleaningTypeOptions` array. The `useEffect` hook below our state initializations is run each time the `cleaningJob` value changes. When it receives a valid `cleanignJob`, it updates the form state with whatever attributes the cleaning resource already has. By doing this, we have made our form flexible enough to support existing cleaning jobs and ones that are yet to be made. That is why we'll be able to use this hook for both our `CleaningJobCreateForm` and `CleaningJobEditForm` components.
+
+The rest of the hooks is code we've seen before, so we won't dive into it any further.
+
+Let's see our work in action.
+
+Open up the `CleaningJobEditForm` and make the following adjustments:
+
+```jsx:title=<span>CleaningJobEditForm.js</span>
+import React from "react"
+import { connect } from "react-redux"
+import { useNavigate } from "react-router-dom"
+import { Actions as cleaningActions } from "redux/cleanings"
+import { useCleaningJobForm } from "hooks/ui/useCleaningJobForm"
+import {
+  EuiButton,
+  EuiFieldText,
+  EuiForm,
+  EuiFormRow,
+  EuiFieldNumber,
+  EuiSuperSelect,
+  EuiSpacer,
+  EuiTextArea,
+} from "@elastic/eui"
+import styled from "styled-components"
+
+const Wrapper = styled.div`
+  padding: 1rem 2rem;
+`
+
+function CleaningJobEditForm({ cleaningId, updateCleaning }) {
+  const navigate = useNavigate()
+  const {
+    form,
+    errors,
+    setErrors,
+    isUpdating,
+    getFormErrors,
+    validateInput,
+    onCleaningTypeChange,
+    setHasSubmitted,
+    onInputChange,
+    cleaningTypeOptions
+  } = useCleaningJobForm(cleaningId)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    Object.keys(form).forEach((label) => validateInput(label, form[label]))
+
+    if (!Object.values(form).every((value) => Boolean(value))) {
+      setErrors((errors) => ({ ...errors, form: `You must fill out all fields.` }))
+      return
+    }
+
+    setHasSubmitted(true)
+
+    const res = await updateCleaning({ cleaningId, cleaningUpdate: { ...form } })
+    if (res.success) {
+      navigate(`/cleaning-jobs/${cleaningId}`)
+    }
+  }
+
+  return (
+    <Wrapper>
+      <EuiForm
+        component="form"
+        onSubmit={handleSubmit}
+        isInvalid={Boolean(getFormErrors().length)}
+        error={getFormErrors()}
+      >
+        <EuiFormRow
+          label="Job Title"
+          helpText="What do you want cleaners to see first?"
+          isInvalid={Boolean(errors.name)}
+          error={`Please enter a valid name.`}
+        >
+          <EuiFieldText name="name" value={form.name} onChange={(e) => onInputChange(e.target.name, e.target.value)} />
+        </EuiFormRow>
+
+        <EuiFormRow label="Select a cleaning type">
+          <EuiSuperSelect
+            options={cleaningTypeOptions}
+            valueOfSelected={form.cleaning_type}
+            onChange={(value) => onCleaningTypeChange(value)}
+            itemLayoutAlign="top"
+            hasDividers
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Hourly Rate"
+          helpText="List a reasonable price for each hour of work the employee logs."
+          isInvalid={Boolean(errors.price)}
+          error={`Price should match the general format: 9.99`}
+        >
+          <EuiFieldNumber
+            name="price"
+            icon="currency"
+            placeholder="19.99"
+            value={form.price}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Job Description"
+          helpText="What do you want prospective employees to know about this opportunity?"
+          isInvalid={Boolean(errors.description)}
+          error={`Please enter a valid input.`}
+        >
+          <EuiTextArea
+            name="description"
+            placeholder="I'm looking for..."
+            value={form.description}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiSpacer />
+
+        <EuiButton type="submit" isLoading={isUpdating} fill iconType="save" iconSide="right">
+          Update Cleaning
+        </EuiButton>
+      </EuiForm>
+    </Wrapper>
+  )
+}
+
+export default connect(null, {
+  updateCleaning: cleaningActions.updateCleaningJob,
+})(CleaningJobEditForm)
+
+```
+
+Like the other form components, our new version has been reduced in size significantly.
+
+And in fact, the same will be true of the `CleaningJobCreateForm` component. Open up that file and modify it accordingly:
+
+```jsx:title=<span>CleaningJobCreateForm.js</span>
+import React from "react"
+import { connect } from "react-redux"
+import { useNavigate } from "react-router-dom"
+import { Actions as cleaningActions } from "redux/cleanings"
+import { useCleaningJobForm } from "hooks/ui/useCleaningJobForm"
+import {
+  EuiButton,
+  EuiFieldText,
+  EuiForm,
+  EuiFormRow,
+  EuiFieldNumber,
+  EuiSuperSelect,
+  EuiSpacer,
+  EuiTextArea
+} from "@elastic/eui"
+
+function CleaningJobCreateForm({ createCleaning }) {
+  const navigate = useNavigate()
+  const {
+    form,
+    errors,
+    setErrors,
+    isLoading,
+    validateInput,
+    setHasSubmitted,
+    getFormErrors,
+    cleaningTypeOptions,
+    onCleaningTypeChange,
+    onInputChange
+  } = useCleaningJobForm()
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    Object.keys(form).forEach((label) => validateInput(label, form[label]))
+
+    if (!Object.values(form).every((value) => Boolean(value))) {
+      setErrors((errors) => ({ ...errors, form: `You must fill out all fields.` }))
+      return
+    }
+
+    setHasSubmitted(true)
+
+    const res = await createCleaning({ new_cleaning: { ...form } })
+    if (res.success) {
+      const cleaningId = res.data?.id
+      navigate(`/cleaning-jobs/${cleaningId}`)
+    }
+  }
+
+  return (
+    <>
+      <EuiForm
+        component="form"
+        onSubmit={handleSubmit}
+        isInvalid={Boolean(getFormErrors().length)}
+        error={getFormErrors()}
+      >
+        <EuiFormRow
+          label="Job Title"
+          helpText="What do you want cleaners to see first?"
+          isInvalid={Boolean(errors.name)}
+          error={`Please enter a valid name.`}
+        >
+          <EuiFieldText
+            name="name"
+            value={form.name}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiFormRow label="Select a cleaning type">
+          <EuiSuperSelect
+            options={cleaningTypeOptions}
+            valueOfSelected={form.cleaning_type}
+            onChange={(value) => onCleaningTypeChange(value)}
+            itemLayoutAlign="top"
+            hasDividers
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Hourly Rate"
+          helpText="List a reasonable price for each hour of work the employee logs."
+          isInvalid={Boolean(errors.price)}
+          error={`Price should match the general format: 9.99`}
+        >
+          <EuiFieldNumber
+            name="price"
+            icon="currency"
+            placeholder="19.99"
+            value={form.price}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiFormRow
+          label="Job Description"
+          helpText="What do you want prospective employees to know about this opportunity?"
+          isInvalid={Boolean(errors.description)}
+          error={`Please enter a valid input.`}
+        >
+          <EuiTextArea
+            name="description"
+            placeholder="I'm looking for..."
+            value={form.description}
+            onChange={(e) => onInputChange(e.target.name, e.target.value)}
+          />
+        </EuiFormRow>
+
+        <EuiSpacer />
+
+        <EuiButton type="submit" isLoading={isLoading} fill>
+          Create Cleaning
+        </EuiButton>
+      </EuiForm>
+    </>
+  )
+}
+
+export default connect(null, {
+  createCleaning: cleaningActions.createCleaningJob
+})(CleaningJobCreateForm)
+
+```
+
+A similar feel here. An almost 100 line reduction in code. That is the magic of using custom hooks. Encapsulated logic, reduced component size, and organized ui management.
+
+Take the newly updated components for a spin. Create a new cleaning job and then edit it.
+
+We have a lot of things right here. But our cleaning jobs are missing offers. We could return to our old method of fetching offers for a cleaning job when a component is mounted, but it probably makes more sense to populate cleaning jobs with their associated offers. So for the time being, we'll leave the world of React hooks behind and head to FastAPI land for some backend updates.
+
+## Fetching All Offers For User-Owned Cleaning Jobs
+
+### Circular Import Problem
+
+- Introduce the well-documented problem with ciruclar imports for Pydantic models
+  - https://github.com/samuelcolvin/pydantic/issues/707
+  - https://github.com/samuelcolvin/pydantic/discussions/2395
+  - https://github.com/samuelcolvin/pydantic/issues/1873
+  - https://pydantic-docs.helpmanual.io/usage/postponed_annotations/#self-referencing-models
+
+Problem is as the last issue states:
+
+> But the solution is quite counterintuitive, so we we need to modify m1.py while import error happens in m2.py, and if there are more models, with some graph of dependencies, things goes more complicated, not sure we can handle three or more models this way. Also placing import in the bottom of the file violates PEP-8.
+
+Start by showing the approach that looks like this:
+
+```python
+from __future__ import annotations
+
+# ...other code
+
+class CleaningPublic(CleaningInDB):
+    owner: Union[int, UserPublic]
+    offers: Optional[List[OfferPublic]] = []
+
+
+from app.models.offer import OfferPublic
+
+CleaningPublic.update_forward_refs()
+
+```
+
+And maybe even show the string version of it.
+
+Then discuss that it violates PEP-8 and is probably inefficient.
+
+Instead, we'll refactor and remove the cleanings attribute from offers.
+
+### Updating the Cleanings Repo and Cleanings Tests
+
+Then, once we add the offers list to CleaningPublic, we'll need to update the repository to exclude "offers" when updating the cleaning model.
+
+We also need to update the get cleaning by id test to ignore offers.
+
+Then we'll write a new test case called `TestPopulatedCleanings`
+
+Make sure to pull in the offers repo into the cleanings repo.
+
+Add a populate param to the `list_all_user_cleanings` method in the `cleanings` repo. Add a `populate_offers` param to the `populate_cleaning` method and use it to grab all offers for the cleaning being requested.
+
+Then the `populate_cleaning` method calls teh offers_repo's `list_offers_for_cleaning` method if `populate_offers` is true, otherwise it defaults to an empty list.
+
+We'll need to update the tests some more.
+
+The `test_get_all_cleanings_returns_only_user_owned_cleanings` will need to parse the cleanings as `CleaningPublic` model now that they're being populated by default. We also have to update the rest of the test since we're comparing `CleaningInDB` models to `CleaningPublic` models.
+
+### Adding One More Test Class For Good Measure
+
+```python
+class TestPopulatedCleanings:
+    async def test_when_user_fetches_their_own_cleanings_they_come_populated_with_offers(
+        self,
+        app: FastAPI,
+        create_authorized_client: Callable,
+        test_user2: UserInDB,
+        test_user_list: List[UserInDB],
+        test_list_of_cleanings_with_pending_offers: List[CleaningInDB],
+    ) -> None:
+        test_user_ids = [u.id for u in test_user_list]
+        test_cleaning_ids = [c.id for c in test_list_of_cleanings_with_pending_offers]
+        authorized_client = create_authorized_client(user=test_user2)
+        res = await authorized_client.get(app.url_path_for("cleanings:list-all-user-cleanings"))
+        assert res.status_code == status.HTTP_200_OK
+
+        cleanings = [CleaningPublic(**c) for c in res.json()]
+        for c in cleanings:
+            if c.id in test_cleaning_ids:
+                assert len(c.offers) == len(test_user_list)
+                for offer in c.offers:
+                    assert offer.user_id in test_user_ids
+```
+
+## Back to the offers React stuff
+
+Start creating this one and realize we're going to need some cleaning specific data about offers.
+
+So then create an `useOffersForCleaningJob` hook that grabs all the offers for a particular cleaning job and creates the appropriate action handlers
+
+### Normalizing our Redux data
+
+First we start by normalizing the cleaning jobs returned in our `FETCH_ALL_USER_OWNED_CLEANING_JOBS_SUCCESS` with a `normalizeCleanings` util in the `utils/cleanings` file. We replace all the offers for a cleaning job with an `id`. Then, we'll refactor the `CREATE_CLEANING_JOB_SUCCESS`, `FETCH_CLEANING_JOB_BY_ID_SUCCESS`, and `UPDATE_CLEANING_JOB_SUCCESS` actions to use the same normalizing function. We'll want to change the FETCH_CLEANING_JOB_BY_ID to just use an id as the determining metric and keep the cleaning job in `state.cleaning.data` like the rest of them.
+
+### Normalize Offers By Extracting Them From Cleanings and Adding Them To Redux state
+
+Then we'll use simple redux selectors to access those values from state and compose the proper data into what we need.
+
+### Create a Dashboard Page
+
+### Create a `useUserOwnedCleanings` hook
+
+### Redirect the user to their dashboard upon successful auth instead of their profile page.

@@ -103,12 +103,11 @@ interface IOtherPostLink {
   rightSpace?: boolean
 }
 const OtherPostLink: React.FC<IOtherPostLink> = ({ post, rightSpace }) => {
-  const svgStyle = {
-    minHeight: "200px",
-  }
+  const svgStyle = { minHeight: "200px" }
+
   return (
     <OtherPostLinkWrapper $rightSpace={rightSpace}>
-      <StyledOtherPostLink to={`/blog/${post.slug}`}>
+      <StyledOtherPostLink to={`/blog/${post.slug.toLowerCase()}`}>
         <BlogCategorySVG category={post.category} style={svgStyle} />
         <OtherPostLinkContent>
           <p>{post.title}</p>
