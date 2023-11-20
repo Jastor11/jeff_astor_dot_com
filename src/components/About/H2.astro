@@ -1,0 +1,21 @@
+---
+import { cn } from "@/utils/styles"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const wrapperClassnames = cn([
+  "mt-8",
+  "text-light",
+  "font-heading font-light text-4xl",
+  //
+  className,
+])
+---
+
+<h2 class={wrapperClassnames} {...props}>
+  <slot />
+</h2>

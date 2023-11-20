@@ -1,0 +1,16 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import StandardAppSeo from "@/components/Head/StandardAppSeo.astro"
+import UndrawSvg from "@/components/Media/UndrawSvg.astro"
+import { UndrawSvgNames } from "@/lib/undraw"
+---
+
+<AppLayout title="Not Found" isLanding={false}>
+  <StandardAppSeo slot="head" />
+  <div class:list={["flex flex-col items-center justify-start", "h-screen"]}>
+    <h1 class="text-white text-4xl">Oops! Page not found.</h1>
+    <div>
+      <UndrawSvg name={"NOT_FOUND"} className="h-[70vh]" />
+    </div>
+  </div>
+</AppLayout>

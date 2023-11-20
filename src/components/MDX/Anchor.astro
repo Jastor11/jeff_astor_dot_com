@@ -1,0 +1,30 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"a"> & {
+  className?: string
+}
+
+const { href, class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  "text-accent-light no-underline hover:underline duration-200",
+  className,
+  //
+])
+
+const linkTo = href ? href : "#"
+const isExternal = String(linkTo).startsWith?.("http")
+---
+
+<a
+  href={linkTo}
+  class={elementClassnames}
+  target={isExternal ? "_blank" : undefined}
+  rel={isExternal ? "noopener noreferrer" : "prefetch"}
+  {...props}
+>
+  <slot />
+</a>

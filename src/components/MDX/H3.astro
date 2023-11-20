@@ -1,0 +1,23 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"h3"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  styles.headingStyles,
+  "text-2xl",
+  // "break-all xs:break-normal",
+  className,
+  //
+])
+---
+
+<h3 class={elementClassnames} {...props}>
+  <slot />
+</h3>

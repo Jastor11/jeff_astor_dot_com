@@ -1,0 +1,18 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+
+type Props = HTMLAttributes<"a">
+
+const { href, class: className, ...props } = Astro.props
+
+const classes = cn([
+  "text-accent-light hover:underline duration-200",
+  className,
+  //
+])
+---
+
+<a href={href} target="_blank" rel="noopener noreferrer" class={classes} {...props}>
+  <slot />
+</a>

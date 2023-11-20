@@ -1,0 +1,23 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  title?: string
+  description?: string
+  className?: string
+}
+
+const { title, description, className } = Astro.props
+
+const classes = cn(
+  "BlogPost prose",
+  // "pb-10",
+  className
+)
+import MontyHall from "@/components/MDX/viz/MontyHall"
+---
+
+<AppLayout title={title} description={description} className={classes} excludeOpenGraph={true} excludeTwitter={true}>
+  <MontyHall client:load />
+</AppLayout>

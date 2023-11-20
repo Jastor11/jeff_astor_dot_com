@@ -1,0 +1,40 @@
+---
+import BaseHead from "@/components/Head/BaseHead.astro"
+import Navbar from "@/components/Nav/Navbar.astro"
+
+type Props = {
+  title?: string
+  description?: string
+  isLanding?: boolean
+  className?: string
+  image?: string
+  excludeOpenGraph?: boolean
+  excludeTwitter?: boolean
+}
+
+const { isLanding, className, title, description, image, excludeOpenGraph, excludeTwitter } = Astro.props
+---
+
+<html lang="en">
+  <head>
+    <BaseHead
+      title={title}
+      description={description}
+      image={image}
+      excludeOpenGraph={excludeOpenGraph}
+      excludeTwitter={excludeTwitter}
+    />
+    <slot name="head">
+      <style>
+        a.stuff {
+          color: "slot-fallback";
+        }
+      </style>
+    </slot>
+  </head>
+
+  <body class="min-h-screen w-full max-w-[100vw] relative bg-less-dark">
+    <Navbar isLanding={isLanding} className={className} />
+    <slot />
+  </body>
+</html>

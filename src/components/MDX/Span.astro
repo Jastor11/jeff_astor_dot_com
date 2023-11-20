@@ -1,0 +1,20 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"span"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  className,
+  //
+])
+---
+
+<span class={elementClassnames} {...props}>
+  <slot />
+</span>

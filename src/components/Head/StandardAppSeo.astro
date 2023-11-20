@@ -1,0 +1,49 @@
+---
+// Found on the astro page: https://docs.astro.build/en/core-concepts/routing
+// <!--
+//   TODO: Add json+ld data, maybe https://schema.org/APIReference makes sense?
+//   Docs: https://developers.google.com/search/docs/advanced/structured-data/intro-structured-data
+//   https://www.npmjs.com/package/schema-dts seems like a great resource for implementing this.
+//   Even better, there’s a React component that integrates with `schema-dts`: https://github.com/google/react-schemaorg
+// -->
+
+import { config } from "@/core/config"
+
+const {
+  site_url,
+  // sub_title,
+  site_title,
+  info,
+
+  // site_logo,
+  // site_description,
+} = config
+
+const image = "/images/astor_teaching_512_x_512.jpg"
+const logo = "/images/JeffAstor_Logo_512x512_rounded.png"
+
+const imageUrl = new URL(image, Astro.site)
+const logoUrl = new URL(logo, Astro.site)
+
+const jeffAstorLandingSeo = {
+  "@context": "http://schema.org",
+  "@type": "WebSite",
+  name: site_title,
+  url: site_url,
+  logo: logoUrl.toString(),
+  image: imageUrl.toString(),
+  // name: "JeffAstor.com",
+  // url: "https://www.jeffastor.com",
+  // logo: "https://jeffastor.com/images/JeffAstor_Logo_512x512_rounded.png",
+  // image: "https://jeffastor.com/images/astor_teaching_512_x_512.jpg",
+  sameAs: [
+    //
+    `https://github.com/jastor11`,
+    `https://www.linkedin.com/in/mrjeffastor/`,
+  ],
+  // "alternateName": "High School CS teacher for almost a decade. Remote developer and all-purpose nerd. I write about learning, technology, and how technology learns."
+}
+const stringifiedSchema = JSON.stringify(jeffAstorLandingSeo)
+---
+
+<script type="application/ld+json" set:html={stringifiedSchema} />

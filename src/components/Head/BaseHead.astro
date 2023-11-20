@@ -1,0 +1,125 @@
+---
+// Import the global.css file here so that it is included on
+// all pages through the use of the <BaseHead /> component.
+import "@/styles/variables.css"
+import "@/styles/fonts.css"
+import "@/styles/global.css"
+// code blocks
+import "@/styles/code/code-blocks.css"
+import "@/styles/code/code-titles.css"
+import "@/styles/code/rehype-pretty-code.css"
+// commento - commento has been discontinued
+// import "@/styles/commento.css"
+
+// import katex styles
+import "katex/dist/katex.min.css"
+
+import Favicons from "./Favicons.astro"
+// import MicrosoftClarityAnalytics from "./Analytics/MicrosoftClarity.astro"
+
+import { appendToMetaTitle, metaDescriptionOrDefault } from "@/lib/meta"
+
+type Props = {
+  title?: string
+  description?: string
+  image?: string
+  excludeOpenGraph?: boolean
+  excludeTwitter?: boolean
+}
+
+const canonicalURL = new URL(Astro.url.pathname, Astro.site)
+
+const {
+  title,
+  description,
+  image = "/astor_teaching.jpg",
+  excludeOpenGraph = false,
+  excludeTwitter = false,
+} = Astro.props
+
+const metaTitle = appendToMetaTitle(title)
+const metaDescription = metaDescriptionOrDefault(description)
+---
+
+<!-- Global Metadata -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+
+<!-- Favicons  -->
+<Favicons />
+
+<meta name="generator" content={Astro.generator} />
+
+<!-- Canonical URL -->
+<link rel="canonical" href={canonicalURL} />
+
+<!-- Primary Meta Tags -->
+<title>{metaTitle}</title>
+<meta name="title" content={metaTitle} />
+<meta name="description" content={metaDescription} />
+
+<!-- Fonts and other preloaded assets -->
+<link
+  rel="preload"
+  href="/fonts/IBM_Plex_Mono/IBMPlexMono-Regular.ttf"
+  as="font"
+  type="font/ttf"
+  crossorigin="anonymous"
+/>
+<link
+  rel="preload"
+  href="/fonts/IBM_Plex_Mono/IBMPlexMono-Bold.ttf"
+  as="font"
+  type="font/ttf"
+  crossorigin="anonymous"
+/>
+<link
+  rel="preload"
+  href="/fonts/Plus_Jakarta_Sans/PlusJakartaSans-VariableFont_wght.ttf"
+  as="font"
+  type="font/ttf"
+  crossorigin="anonymous"
+/>
+<link
+  rel="preload"
+  href="/fonts/Plus_Jakarta_Sans/PlusJakartaSans-Italic-VariableFont_wght.ttf"
+  as="font"
+  type="font/ttf"
+  crossorigin="anonymous"
+/>
+<link
+  rel="preload"
+  href="/fonts/TT_Firs_Neue/TT_Firs_Neue_Variable.ttf"
+  as="font"
+  type="font/ttf"
+  crossorigin="anonymous"
+/>
+
+<!-- Open Graph / Facebook -->
+{
+  excludeOpenGraph ? null : (
+    <>
+      <meta property="og:type" content="website" />
+      <meta property="og:url" content={Astro.url} />
+      <meta property="og:title" content={metaTitle} />
+      <meta property="og:description" content={metaDescription} />
+      <meta property="og:image" content={new URL(image, Astro.url)} />
+    </>
+  )
+}
+
+<!-- Twitter -->
+{
+  excludeTwitter ? null : (
+    <>
+      <meta property="twitter:card" content="summary_large_image" />
+      <meta property="twitter:url" content={Astro.url} />
+      <meta property="twitter:title" content={metaTitle} />
+      <meta property="twitter:description" content={metaDescription} />
+      <meta property="twitter:image" content={new URL(image, Astro.url)} />
+    </>
+  )
+}
+
+<!-- Analytics -->
+<!-- <MicrosoftClarityAnalytics /> -->

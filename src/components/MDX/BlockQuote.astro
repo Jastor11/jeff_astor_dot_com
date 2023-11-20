@@ -1,0 +1,27 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"blockquote"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  styles.maxWidthStyles,
+  "post-blockquote",
+  "post-blockquote-slant",
+  "bg-accent-light border-l-[15px] border-l-accent",
+  "pt-1 px-4 pb-4",
+  "mx-auto my-0",
+  "rounded-xl",
+  className,
+  //
+])
+---
+
+<blockquote class={elementClassnames} {...props}>
+  <slot />
+</blockquote>

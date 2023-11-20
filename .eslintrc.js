@@ -1,37 +1,62 @@
+/** @type {import("eslint").Linter.Config} */
 module.exports = {
-  parser: "@typescript-eslint/parser",
-  extends: ["airbnb-base", "prettier"],
-  plugins: ["react", "jsx-a11y", "import"],
+  env: {
+    node: true,
+    es2022: true,
+    browser: true,
+  },
+  plugins: ["tailwindcss"],
+  extends: ["eslint:recommended", "plugin:astro/recommended", "plugin:tailwindcss/recommended"],
+  parserOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module",
+  },
   rules: {
-    "arrow-parens": ["error", "as-needed"],
-    "no-console": "off",
-    "no-else-return": "off",
-    "no-plusplus": "off",
-    "no-use-before-define": ["error", { functions: false }],
-    "object-curly-newline": "off",
-    "operator-linebreak": ["error", "after"],
-    semi: "off",
+    "tailwindcss/migration-from-tailwind-2": "off",
+    "tailwindcss/no-custom-classname": "off",
+    "tailwindcss/classnames-order": "off",
   },
   settings: {
-    // "import/core-modules": [],
-    "import/resolver": {
-      alias: [
-        ["assets", "./src/assets/*"],
-        ["components", "./src/components/*"],
-        ["config", "./config"],
-        ["hooks", "./src/hooks"],
-        ["images", "./src/images"],
-        ["layout", "./src/layout"],
-        ["models", "./src/models"],
-        ["pages", "./src/pages"],
-        ["services", "./src/services"],
-        ["utils", "./src/utils"],
-      ],
+    tailwindcss: {
+      config: "./tailwind.config.cjs",
     },
   },
-  env: {
-    browser: true,
-    node: true,
-    es6: true,
-  },
+  ignorePatterns: ["**/.astro/**"],
+  overrides: [
+    {
+      files: ["*.js"],
+      rules: {
+        "no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
+      },
+    },
+    {
+      files: ["*.astro"],
+      parser: "astro-eslint-parser",
+      parserOptions: {
+        parser: "@typescript-eslint/parser",
+        extraFileExtensions: [".astro"],
+      },
+      rules: {
+        "no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
+      },
+    },
+    {
+      files: ["*.ts"],
+      parser: "@typescript-eslint/parser",
+      extends: ["plugin:@typescript-eslint/recommended"],
+      rules: {
+        "@typescript-eslint/no-unused-vars": [
+          "error",
+          { argsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" },
+        ],
+        "@typescript-eslint/no-non-null-assertion": "off",
+      },
+    },
+    {
+      // Define the configuration for `<script>` tag.
+      // Script in `<script>` is assigned a virtual file name with the `.js` extension.
+      files: ["**/*.astro/*.js", "*.astro/*.js"],
+      parser: "@typescript-eslint/parser",
+    },
+  ],
 }

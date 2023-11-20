@@ -1,0 +1,28 @@
+.BlogPost .remark-code-title {
+	max-width: var(--code-max-width);
+	margin: 0 auto;
+}
+
+.BlogPost .remark-code-title span,
+.BlogPost .remark-code-title small {
+	background-color: rgb(109, 99, 255);
+	color: white;
+	display: inline-block;
+	height: 100%;
+	padding: 0.5rem 1rem;
+	border-top-left-radius: 0.3rem;
+	border-top-right-radius: 0.3rem;
+	font-family: "Dank Mono", "IBM Plex Mono", Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+
+	position: relative;
+    z-index: 10;
+    transform: translateY(1px);
+    border-left: solid 2px #ababb7;
+    border-right: solid 2px #ababb7;
+    border-top: solid 2px #ababb7;	
+}
+
+.BlogPost .remark-code-title span,
+.BlogPost .remark-code-title small {
+	font-size: 0.9rem;
+}

@@ -1,0 +1,33 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+
+import OtherPostPreview from "./OtherPostPreview.astro"
+
+import { cn } from "@/utils/styles"
+
+type Props = {
+  className?: string
+  prevPost?: BlogPostWithMeta
+  nextPost?: BlogPostWithMeta
+}
+
+const props = Astro.props
+
+const wrapperClassnames = cn([
+  "w-full max-w-screen-95% sm:max-w-screen-90% md:max-w-screen-85% tablet:max-w-screen-80% xl:max-w-screen-75%",
+  "mx-auto",
+  "flex flex-col sm:flex-row justify-between",
+  // "gap-0 mobile:gap-12",
+  "gap-3 mobile:gap-12",
+  "mt-10",
+  "mb-12",
+  "px-2.5",
+  props.className,
+  //
+])
+---
+
+<div class={wrapperClassnames}>
+  <OtherPostPreview post={props.nextPost} isPrevious />
+  <OtherPostPreview post={props.prevPost} />
+</div>

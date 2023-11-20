@@ -1,0 +1,47 @@
+---
+import StyledH2 from "./H2.astro"
+import StyledP from "./P.astro"
+import StyledLink from "@/components/Common/ExternalLink.astro"
+
+import { cn } from "@/utils/styles"
+
+const wrapperClassnames = cn(["flex flex-col flex-1", "m-4", ""])
+---
+
+<div class={wrapperClassnames}>
+  <StyledH2>This Site</StyledH2>
+  <StyledP>
+    {`This site was created using `}
+    <StyledLink href="https://www.astro.build/">Astro.js</StyledLink>
+    {` and has been rebuilt more times than I can count at this point.`}
+  </StyledP>
+  <StyledP>
+    {`All styling is done using the exceptional `}
+    <StyledLink href="https://tailwindcss.com/">Tailwind css</StyledLink>{` `}
+    {`library, though code syntax highlighting is accomplished via `}
+    <StyledLink href="https://shiki.matsu.io/">shiki</StyledLink>
+    {`, customized with colors derived from the `}
+    <StyledLink href="https://dankneon.com/">dank neon</StyledLink>
+    {`, `}
+    <StyledLink href="https://github.com/atomiks/moonlight-vscode-theme/">moonlight II</StyledLink>
+    {`, and `}
+    <StyledLink href="https://draculatheme.com/pro/">dracula</StyledLink>
+    {` vscode themes.`}
+  </StyledP>
+  <StyledP>
+    {`Most components are built from scratch, although many of the React islands depend on headless elements from `}
+    <StyledLink href="https://www.radix-ui.com/">radix-ui</StyledLink>
+    {
+      `, helping to ensure consistent functionality and reliable accessibility throughout the site. Any visualizations are built using the venerable `
+    }
+    <StyledLink href="https://d3js.org/">d3.js</StyledLink>
+    {` library, though I often leverage various packages from AirBnB's `}
+    <StyledLink href="https://airbnb.io/visx/">visx</StyledLink>
+    {` monorepo, as they abstract away many of the tedious parts that come from working with svgs.`}
+  </StyledP>
+  <StyledP>
+    {`Media is entirely self-generated, unless otherwise specified. Of course this excludes the beautiful `}
+    <StyledLink href="https://undraw.co/">unDraw</StyledLink>
+    {` svgs that are used throughout the site.`}
+  </StyledP>
+</div>

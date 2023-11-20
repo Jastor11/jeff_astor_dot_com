@@ -1,0 +1,20 @@
+---
+import { categoryToUndrawMapping, undrawImageAssetMapping } from "@/lib/undraw"
+import { Image } from "astro:assets"
+
+type Props = {
+  name: string
+  className?: string
+  width?: number
+  height?: number
+  color?: string
+}
+
+const { className, name, ...props } = Astro.props
+
+const undrawSvgName = categoryToUndrawMapping?.[name]
+
+const imageAsset = undrawImageAssetMapping?.[undrawSvgName]
+---
+
+<Image src={imageAsset} alt="undraw svg cover image" class={className} />

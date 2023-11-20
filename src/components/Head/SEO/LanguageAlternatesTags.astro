@@ -1,0 +1,26 @@
+---
+type Props = {
+  languageAlternates?: {
+    hrefLang: string
+    href: URL | string
+  }[]
+}
+
+// const { languageAlternates, ...props } = Astro.props
+const props = Astro.props
+// const { languageAlternates, ...rest } = Astro.props
+const languageAlternates = props.languageAlternates ?? []
+---
+
+{
+  languageAlternates.map((alternate) => {
+    return (
+      <link
+        rel="alternate"
+        hreflang={alternate.hrefLang}
+        href={alternate.href}
+        {...(Array.isArray(languageAlternates) && false ? props : {})}
+      />
+    )
+  })
+}

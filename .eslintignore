@@ -1,5 +1,4 @@
-public
-# config
+dist
 node_modules
-.cache
-content
+.github
+types.generated.d.ts

@@ -1,0 +1,43 @@
+---
+import NavLinks from "./NavLinks.astro"
+import NavLogo from "./NavLogo.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  isLanding?: boolean
+  light?: boolean
+  className?: string
+}
+const { light, className, isLanding, ...props }: Props = Astro.props
+
+const nonLandingNavbarClassnames = cn([
+  //
+  "px-10",
+  "sticky left-0 right-0 top-0",
+  "z-30",
+])
+
+const afterAndBeforeClassnames = cn([
+  "after:absolute after:w-full after:h-1 after:bg-less-dark after:-bottom-1 after:left-0 after:translate-y-px",
+  "before:absolute before:w-full before:h-5 before:bg-less-dark before:-top-5 before:left-0",
+])
+
+const navbarClassnames = cn([
+  "navbar",
+  "flex items-center justify-center sm:justify-between",
+  "flex-col sm:flex-row",
+  "w-full h-28 min-h-28 sm:h-24 sm:min-h-24",
+  "px-1 sm:px-8",
+  "pt-1.5 sm:pt-0",
+  light ? "bg-light" : "bg-less-dark",
+  "border-b border-b-light",
+  afterAndBeforeClassnames,
+  isLanding ? null : nonLandingNavbarClassnames,
+  className,
+])
+---
+
+<header class={navbarClassnames} {...props}>
+  <NavLogo />
+  <NavLinks />
+</header>

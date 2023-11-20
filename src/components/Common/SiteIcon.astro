@@ -1,0 +1,19 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+
+type Props = HTMLAttributes<"span">
+
+const { class: className, ...props } = Astro.props
+
+const iconClassnames = cn([
+  "brand-icon-slant",
+  "bg-accent",
+  "block",
+  "h-7 w-2.5",
+  className,
+  //
+])
+---
+
+<span class={iconClassnames} {...props}></span>

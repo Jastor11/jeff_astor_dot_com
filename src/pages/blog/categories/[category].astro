@@ -1,0 +1,72 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import PostListing from "@/components/Blog/PostListing/PostListing.astro"
+import StandardAppSeo from "@/components/Head/StandardAppSeo.astro"
+import { getPublishedBlogPosts, extractUniqueCategoriesFromBlogPosts, getPostsByCategory } from "@/lib/blog-posts"
+import { slugify } from "@/utils/slugify"
+import { cn } from "@/utils/styles"
+
+export async function getStaticPaths() {
+  const posts = await getPublishedBlogPosts()
+  const categories = extractUniqueCategoriesFromBlogPosts(posts)
+
+  const orderedCategories = categories.sort((a, b) => {
+    return a.localeCompare(b)
+  })
+
+  return orderedCategories.map((category) => {
+    const slugifiedCategory = slugify(category)
+    const postsForCategory = getPostsByCategory(posts, slugifiedCategory)
+
+    return {
+      params: { category: slugifiedCategory },
+      props: { category, slugifiedCategory, postsForCategory },
+    }
+  })
+}
+
+type Props = {
+  category: string
+  slugifiedCategory: string
+  postsForCategory: ReturnType<typeof getPostsByCategory>
+}
+
+// const { category } = Astro.params
+const { category, postsForCategory, ...props } = Astro.props
+
+const titleClassnames = cn([
+  "text-light",
+  "text-4xl",
+  "font-bold",
+  "py-4",
+  //
+])
+
+const afterAndBeforeClassnames = cn([
+  "after:absolute after:w-full after:h-1 after:bg-less-dark after:-bottom-1 after:left-0 after:translate-y-px",
+])
+
+const tagsTitleWrapperClassnames = cn([
+  "sticky z-30",
+  "top-32 left-0",
+  "top-28 sm:top-24",
+  // "bg-dark",
+  "bg-less-dark",
+  "border-b border-b-light",
+  afterAndBeforeClassnames,
+  "",
+  //
+])
+---
+
+<AppLayout title={category}>
+  <StandardAppSeo slot="head" />
+  <div class="flex flex-col justify-start relative max-w-[84ch] mx-auto pb-8">
+    <div class={tagsTitleWrapperClassnames}>
+      <h1 class={titleClassnames}>
+        Posts for category <span class="text-accent-light">{category}</span> - ({postsForCategory.length} total)
+      </h1>
+    </div>
+    <PostListing posts={postsForCategory} />
+  </div>
+</AppLayout>

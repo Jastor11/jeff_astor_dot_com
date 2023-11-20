@@ -1,0 +1,51 @@
+---
+import PostTag from "./PostTag.astro"
+
+import { cn } from "@/utils/styles"
+
+type Tag = string
+
+const maxWidthStyles = cn(
+  "px-1.5",
+  "max-w-screen-95%",
+  "mobile:max-w-screen-95%",
+  "xs:max-w-screen-95%",
+  "sm:max-w-screen-95%",
+  "tablet:max-w-screen-tablet",
+  "lg:max-w-screen-tablet"
+)
+
+type Props = {
+  tags: Tag[]
+}
+
+const props = Astro.props
+// export function PostTags({ tags }: PostTagsProps) {
+//   return (
+//     <div
+//       className={cn(
+//         "py-8 pr-2.5",
+//         maxWidthStyles,
+//         "mx-auto"
+//         // ""
+//       )}
+//     >
+//       <h3 className="font-semibold text-3xl text-white font-heading">Tags: </h3>
+//       <ul className={cn("flex flex-wrap", "pl-0 mt-2")}>
+//         {tags.map((tag) => (
+//           <PostTag tag={tag} key={tag} />
+//         ))}
+//       </ul>
+//     </div>
+//   )
+// }
+
+// export default PostTags
+---
+
+<div class={cn("py-8 pr-2.5", maxWidthStyles, "mx-auto")}>
+  <h3 class="font-semibold text-3xl text-white font-heading">Tags:</h3>
+  <ul class={cn("flex flex-wrap", "pl-0 mt-2")}>
+    {props.tags.map((tag) => <PostTag tag={tag} />)}
+  </ul>
+</div>

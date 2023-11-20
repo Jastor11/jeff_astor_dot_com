@@ -1,0 +1,14 @@
+---
+export type Props = {
+  domain?: string
+  src?: string
+}
+
+const { domain = "jeffastor.com", src = "https://plausible.io/js/script.js" } = Astro.props
+
+// const dataDomain = "jeffastor.com"
+// const scriptSource = `https://plausible.io/js/script.js`
+---
+
+<!-- Plausible Analytics -->
+<script defer data-domain="jeffastor.com" src="https://plausible.io/js/script.js"></script>

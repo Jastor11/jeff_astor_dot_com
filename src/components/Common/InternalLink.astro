@@ -1,0 +1,42 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+
+type Props = HTMLAttributes<"a"> & {
+  prefetch?: boolean | string
+  className?: string
+}
+
+const { href, class: providedClassname, className, prefetch = true, ...props } = Astro.props
+
+const classes = cn([
+  "text-accent-light hover:underline duration-200",
+  providedClassname,
+  className,
+  //
+])
+
+const linkTo = href ?? "#"
+const stringifiedLink = linkTo instanceof URL ? linkTo.toString() : linkTo
+const baseLinkProps = {
+  // class: classes,
+  href: linkTo,
+  rel: typeof prefetch === "string" ? prefetch : prefetch ? "prefetch" : undefined,
+}
+// if we have an external link, set the target to "_blank" and overwrite the rel (prefetch) with "noopener noreferrer"
+const navigationProps =
+  stringifiedLink.startsWith("/") || stringifiedLink.startsWith("#")
+    ? {}
+    : stringifiedLink.startsWith("http")
+    ? { target: "_blank", rel: "noopener noreferrer" }
+    : {}
+
+const linkProps = {
+  ...baseLinkProps,
+  ...navigationProps,
+}
+---
+
+<a {...linkProps} {...props} class={classes}>
+  <slot />
+</a>

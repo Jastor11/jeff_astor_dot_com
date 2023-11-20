@@ -1,0 +1,29 @@
+---
+type Props = {
+  siteId?: string
+}
+
+const { siteId = "ijcwm97t6v" } = Astro.props
+
+const baseUrl = "https://www.clarity.ms/tag/"
+// const siteId = "ijcwm97t6v"
+---
+
+<script type="text/javascript">
+  try {
+    ;(function (c, l, a, r, i, t, y) {
+      c[a] =
+        c[a] ||
+        function () {
+          ;(c[a].q = c[a].q || []).push(arguments)
+        }
+      t = l.createElement(r)
+      t.async = 1
+      t.src = "https://www.clarity.ms/tag/" + i
+      y = l.getElementsByTagName(r)[0]
+      y.parentNode.insertBefore(t, y)
+    })(window, document, "clarity", "script", "ijcwm97t6v")
+  } catch (error) {
+    console.log(`[ANALYTICS]: Error with microsoft clarity analytics`, error)
+  }
+</script>

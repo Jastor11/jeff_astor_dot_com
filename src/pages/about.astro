@@ -1,0 +1,22 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import AboutMyLife from "@/components/About/MyLife.astro"
+import AboutMyWork from "@/components/About/MyWork.astro"
+import AboutThisSite from "@/components/About/ThisSite.astro"
+import StandardAppSeo from "@/components/Head/StandardAppSeo.astro"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+---
+
+<AppLayout title="About" isLanding={false}>
+  <StandardAppSeo slot="head" />
+  <div class="tablet:max-w-[80ch] mx-auto pb-10">
+    <AboutMyLife />
+    <AboutMyWork />
+    <AboutThisSite />
+  </div>
+</AppLayout>

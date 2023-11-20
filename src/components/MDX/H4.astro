@@ -1,0 +1,22 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"h4"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  styles.headingStyles,
+  "text-xl",
+  className,
+  //
+])
+---
+
+<h4 class={elementClassnames} {...props}>
+  <slot />
+</h4>

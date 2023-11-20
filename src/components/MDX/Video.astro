@@ -1,0 +1,19 @@
+---
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  className,
+  //
+])
+---
+
+<video class={elementClassnames} {...props}>
+  <slot />
+</video>

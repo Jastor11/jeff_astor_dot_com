@@ -1,0 +1,29 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+import PostPreview from "@/components/Blog/PostPreview/PostPreview.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  posts: BlogPostWithMeta[]
+}
+
+const { posts, ...props } = Astro.props
+
+const wrapperClassnames = cn([
+  "landing-feed",
+  "flex flex-col",
+  "gap-4",
+  "pt-10 xs:pt-5 lg:pt-0",
+  "px-1 sm:px-0",
+  "mt-1",
+  //
+])
+---
+
+<div class={wrapperClassnames} {...props}>
+  {
+    posts.map((post) => {
+      return <PostPreview post={post} />
+    })
+  }
+</div>

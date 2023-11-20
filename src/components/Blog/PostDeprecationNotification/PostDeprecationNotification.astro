@@ -1,0 +1,72 @@
+---
+import { cn } from "@/utils/styles"
+import InternalLink from "@/components/Common/InternalLink.astro"
+import { formatBlogLinkFromSlug, stripBeginningSlashesFromSlug } from "@/lib/links"
+import * as parseUtils from "@/utils/parse-utils"
+
+type Slug = string
+
+type Props = {
+  className?: string
+  isDeprecated?: boolean
+  deprecatedSlug?: Slug
+  newSlug?: Slug
+}
+
+const props = Astro.props
+
+const linkToDeprecatedSlug = formatBlogLinkFromSlug(stripBeginningSlashesFromSlug(props.deprecatedSlug))
+const linkToNewSlug = formatBlogLinkFromSlug(stripBeginningSlashesFromSlug(props.newSlug))
+
+// const wrapperClassnames = cn([
+//   "flex",
+//   "flex-col",
+//   "items-center",
+//   "justify-center",
+//   "w-full",
+//   "max-w-2xl",
+//   "mx-auto",
+//   "px-4",
+//   "py-8",
+//   "space-y-8",
+//   props.className,
+//   //
+// ])
+
+const wrapperClassnames = cn([
+  "max-w-fit",
+  "mx-auto my-4",
+  "border-b-2 border-b-highlight border-t-2 border-t-highlight",
+  props.className,
+])
+
+const shouldDisplay = parseUtils.isDefined(props.deprecatedSlug) && parseUtils.isDefined(props.newSlug)
+---
+
+{
+  shouldDisplay ? (
+    <div class={wrapperClassnames}>
+      <p class={cn("text-base")}>
+        {props.isDeprecated ? (
+          <>
+            This post has been deprecated in favor of a more up-to-date version. If you're looking for the current one,
+            it's available{" "}
+            <InternalLink href={linkToNewSlug} class="hover:no-underline">
+              here
+            </InternalLink>
+            .
+          </>
+        ) : (
+          <>
+            This post has been modified from its previous version and might be different than one you've previously
+            read. If you're looking for the old post, it can be found{" "}
+            <InternalLink href={linkToDeprecatedSlug} class="hover:no-underline">
+              here
+            </InternalLink>
+            .
+          </>
+        )}
+      </p>
+    </div>
+  ) : null
+}

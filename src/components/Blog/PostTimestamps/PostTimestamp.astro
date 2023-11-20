@@ -1,0 +1,22 @@
+---
+import { prettyDate } from "@/lib/dates"
+import { cn } from "@/utils/styles"
+
+type Datetime = Date | string | number
+
+type Props = {
+  ts: Datetime
+}
+
+const props = Astro.props
+
+const timestampClassnames = cn([
+  "px-3 py-2 rounded-t-lg relative z-[-1] bg-accent",
+  "border-x-2 border-t-2 border-[#ababb7]",
+  //
+])
+---
+
+<time class={timestampClassnames}>
+  {prettyDate(props.ts)}
+</time>

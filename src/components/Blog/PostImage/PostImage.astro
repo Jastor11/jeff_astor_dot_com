@@ -1,0 +1,30 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+import UndrawSvg from "@/components/Media/UndrawSvg.astro"
+import { cn } from "@/utils/styles"
+
+type Category = BlogPostWithMeta["data"]["category"]
+
+type Props = {
+  className?: string
+  category: Category
+}
+
+const { className, category, ...props } = Astro.props
+
+const wrapperClassnames = cn([
+  "flex flex-col",
+  "mb-20",
+  "bg-white",
+  "p-2 sm:p-4 md:p-8",
+  "mr-2 xs:mr-8 sm:mr-10 md:mr-16 tablet:mr-40",
+  "relative z-10",
+  "border-2 border-[#ababb7]",
+  className,
+  //
+])
+---
+
+<div class={wrapperClassnames}>
+  <UndrawSvg name={category ?? "not_found"} className={cn("rounded-sm")} />
+</div>

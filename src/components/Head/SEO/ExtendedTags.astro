@@ -1,0 +1,47 @@
+---
+import type { HTMLAttributes } from "astro/types"
+
+// type LinkProps = HTMLAttributes<"link">
+
+// type Meta = HTMLMetaElement & {
+//   property: string
+// }
+
+type Link = HTMLLinkElement & {
+  prefetch: boolean
+  crossorigin: string
+}
+
+type Meta = HTMLMetaElement & {
+  property: string
+}
+
+type Props = {
+  extend?: {
+    link?: Partial<Link>[]
+    meta?: Partial<Meta>[]
+  }
+}
+
+const props = Astro.props
+
+const links = props.extend?.link ?? []
+const meta = props.extend?.meta ?? []
+
+// <!-- {links.map((attributes: LinkProps) => <link {...attributes} />)} -->
+---
+
+{
+  meta.map(({ content, httpEquiv, name, property }) => {
+    // just something long to keep the formatting
+    return (
+      <meta
+        content={content}
+        http-equiv={httpEquiv}
+        name={name}
+        property={property}
+        {...(Array.isArray(meta) && Array.isArray(links) && false ? props : {})}
+      />
+    )
+  })
+}

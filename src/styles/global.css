@@ -1,0 +1,303 @@
+html,
+body {
+	margin: 0;
+}
+
+body {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+/* Get rid of scrollbar to avoid that weird space in Chrome */
+::-webkit-scrollbar {
+	display: none;
+}
+
+.elevate-0 {
+	box-shadow: 0 0 0 0 transparent;
+}
+
+.elevate-1 {
+	box-shadow: var(--elevation-1);
+}
+
+.elevate-2 {
+	box-shadow: var(--elevation-2);
+}
+
+.elevate-3 {
+	box-shadow: var(--elevation-3);
+}
+
+.elevate-4 {
+	box-shadow: var(--elevation-4);
+}
+
+.elevate-5 {
+	box-shadow: var(--elevation-5);
+}
+
+.elevate-1-to-0 {
+	box-shadow: var(--elevation-1);
+}
+
+.elevate-1-to-0:active {
+	box-shadow: 0 0 0 0 transparent;
+	transform: translateY(1px);
+}
+
+.about-info-image-slant {
+	clip-path: polygon(100% 0, 100% 80%, 35% 100%, 0 100%, 0 0);
+}
+
+.clip-path-slant-down-right {
+	clip-path: polygon(0 0, 100% 0, 100% 100%, 0 calc(100% - 3rem));
+}
+
+.brand-icon-slant {
+	clip-path: polygon(100% 0, 100% 80%, 35% 100%, 0 100%, 0 0);
+}
+
+.after-brand-icon-slant::after {
+	clip-path: polygon(100% 0, 100% 80%, 35% 100%, 0 100%, 0 0);
+}
+
+.small-category-span-slant {
+	clip-path: polygon(0 0, 100% 0%, 100% 80%, 0% 100%);
+}
+
+.jumbo-image-slant {
+	clip-path: polygon(100% 0, 100% 70%, 15% 100%, 0 100%, 0 0);
+}
+
+.post-tag-slant {
+	clip-path: polygon(100% 0, 100% calc(100% - 10px), clamp(20px, 30%, 40px) 100%, 0 100%, 0 0);
+	animation-name: contractingPostTagSlant;
+	animation-duration: 200ms;
+}
+
+.post-tag-slant:hover {
+	clip-path: polygon(100% 0, 100% calc(100% - 10px), 100% 100%, 0 100%, 0 0);
+	animation-name: expandingPostTagSlant;
+	animation-duration: 200ms;
+}
+
+@keyframes expandingPostTagSlant {
+	from {
+		clip-path: polygon(100% 0, 100% calc(100% - 10px), clamp(20px, 30%, 40px) 100%, 0 100%, 0 0);
+	}
+
+	to {
+		clip-path: polygon(100% 0, 100% calc(100% - 10px), 100% 100%, 0 100%, 0 0);
+	}
+}
+
+@keyframes contractingPostTagSlant {
+	from {
+		clip-path: polygon(100% 0, 100% calc(100% - 10px), 100% 100%, 0 100%, 0 0);
+	}
+
+	to {
+		clip-path: polygon(100% 0, 100% calc(100% - 10px), clamp(20px, 30%, 40px) 100%, 0 100%, 0 0);
+	}
+}
+
+@keyframes accordionDown {
+	from {
+		height: 0;
+	}
+
+	to {
+		height: var(--radix-accordion-content-height);
+	}
+}
+
+@keyframes accordionUp {
+	from {
+		height: var(--radix-accordion-content-height);
+	}
+
+	to {
+		height: 0;
+	}
+}
+
+.accordion-content[data-state="open"] {
+	animation: accordionDown 0.2s ease-out;
+}
+
+.accordion-content[data-state="closed"] {
+	animation: accordionUp 0.2s ease-out;
+}
+
+.accordion-trigger[data-state="open"] svg {
+	transform: rotate(90deg);
+}
+
+.accordion-trigger[data-state="closed"] svg {
+	transform: rotate(0deg);
+}
+
+.post-blockquote-slant {
+	clip-path: polygon(0 0, 100% 0%, 100% calc(100% - 40px), 0% 100%);
+}
+
+.post-listing-slant {
+	clip-path: polygon(0 0, 100% 0%, 100% calc(100% - 10px), 0% 100%);
+}
+
+.post-footer-shadow {
+	box-shadow: 0 -5px 5px -5px #333;
+}
+
+
+textarea {
+	width: 100%;
+	font-size: 16px;
+}
+
+input {
+	font-size: 16px;
+}
+
+content {
+	line-height: 1.6;
+}
+
+table {
+	width: 100%;
+}
+
+img {
+	max-width: 100%;
+	height: auto;
+}
+
+pre {
+	padding: 1rem;
+}
+
+pre > code,
+pre > * > code {
+	all: unset;
+}
+
+blockquote {
+	border: 1px solid #999;
+	color: #222;
+	padding: 2px 0px 2px 20px;
+	margin: 0px;
+	font-style: italic;
+}
+
+.BlogPost figure,
+.BlogPost video,
+.BlogPost iframe {
+	margin: 0 auto;
+	justify-content: center;
+	max-width: 95vw;
+}
+
+.BlogPost iframe {
+	width: 100%;
+	min-height: 550px;
+	max-height: 1000px;
+}
+.BlogPost iframe.stackblitz {
+	min-height: 565px;
+}
+
+.BlogPost figure img {
+	margin: 0 auto;
+}
+
+@media screen and (min-width: 900px) {
+	.BlogPost figure {
+		max-width: 900px;
+	}
+}
+
+.BlogPost .PostActions {
+	background: radial-gradient(black, transparent);
+	background: rgba(var(--less-dark), 0.75);
+	background: rgba(var(--less-dark), 0.95);
+	color: white;
+}
+
+.blog-posts-filter-input {
+	box-shadow: var(--elevation-2);
+}
+
+.blog-posts-filter-input:active,
+.blog-posts-filter-input:focus {
+	box-shadow: var(--elevation-4);
+}
+
+/* Table to display dice roll stats in post about dice stats in python */
+.BlogPost table.python-dice-roll {
+	padding: 0;
+	font-size: 12px;
+}
+
+.BlogPost table.python-dice-roll td {
+	transition-duration: 0.1s;
+	text-align: center;
+}
+
+@media screen and (min-width: 768px) {
+	.BlogPost table.python-dice-roll {
+		font-size: 16px;
+	}	
+	.BlogPost table.python-dice-roll td {
+		padding: 0.25rem;
+		padding-top: 0.75rem;
+		padding-bottom: 0.75rem;
+	}
+}
+
+.BlogPost table.python-dice-roll p {
+	all: unset;
+}
+
+.BlogPost table.python-dice-roll td span,
+.BlogPost table.python-dice-roll td p span {
+	font-weight: bold;
+	color: rgb(249, 249, 250) !important;
+}
+
+.post-preview {
+	text-decoration: none !important;
+	text-decoration-line: none !important;
+}
+.post-preview  h4 {
+	text-decoration: none;
+	text-decoration-line: none;
+}
+
+  /* MontyHall.tsx */
+.monty-hall-door-open {
+    background: white;
+    background-size: 100% 50%;
+    background-position: bottom;
+    background-repeat: no-repeat;
+}
+.monty-hall-door-open.contains-car {
+    background: white;
+    background-size: 100% 50%;
+    background-position: 100% 110%;
+    background-repeat: no-repeat;
+}
+.monty-hall-door-closed::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    background: black;
+    z-index: 20;
+    border-radius: 50%;
+}

@@ -1,0 +1,49 @@
+---
+import { cn } from "@/utils/styles"
+
+import StyledH2 from "./H2.astro"
+import StyledP from "./P.astro"
+import StyledLink from "@/components/Common/ExternalLink.astro"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const wrapperClassnames = cn(["flex flex-col flex-grow flex-shrink-0 basis-auto", "m-4", className])
+---
+
+<section class={wrapperClassnames}>
+  <StyledH2>About Me</StyledH2>
+  <div class="flex flex-col">
+    <div class="flex flex-col">
+      <StyledP>
+        {`I completed my early education in Glendale, and then at `}
+        <StyledLink href="https://www.loyolahs.edu">Loyola High School</StyledLink>
+        {`. After graduating from `}
+        <StyledLink href="https://www.cmc.edu/">Claremont McKenna College</StyledLink>
+        {` in 2011, I enlisted with `}
+        <StyledLink href="https://www.teachforamerica.org">Teach for America</StyledLink>
+        {` and taught high school chemistry and computer science for the next 8 years.`}
+      </StyledP>
+    </div>
+    <div class="flex flex-col">
+      <StyledP>
+        {
+          `During my career I've been fortunate to learn from a number
+          of brilliant folks. Through them I've discovered how to design learning
+          experiences, develop digital curriculum, and bring my own ideas to life with code.`
+        }
+      </StyledP>
+    </div>
+    <!-- <div class="flex flex-col">
+      <StyledP>
+        {`Today I spend my time writing software, curating educational materials,
+          and building interactive learning experiences for the web. If you're
+          interested in chatting or grabbing a cup of coffee, contact me.
+          I live in Santa Monica and rarely turn down free caffeine.`}
+      </StyledP>
+    </div> -->
+  </div>
+</section>

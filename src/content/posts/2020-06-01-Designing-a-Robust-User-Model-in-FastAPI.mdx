@@ -1,0 +1,620 @@
+---
+title: "Designing a Robust User Model in a FastAPI App"
+category: "Databases"
+date: "06/01/2020"
+dateModified: "01/13/2021"
+published: "true"
+slug: "designing-a-robust-user-model-in-a-fastapi-app"
+series: up-and-running-with-fastapi
+tags:
+  - python
+  - fastapi
+  - server
+  - postgres
+  - databases
+  - docker
+  - pytest
+  - testing
+---
+
+import FastAPISeriesList from "@/components/MDX/series/FastAPI.astro"
+
+Welcome to Part 6 of Up and Running with FastAPI. If you missed part 5, you can find it [here](/blog/resource-management-with-fastapi).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={6} />
+
+In the previous post we tested and developed HTTP endpoints for create, read, update, and delete actions involving our Cleaning resource. With that structure in place, we're now ready to allow users to sign up for our application and manage cleanings themselves. We'll start in this post by designing a user model and letting users register for our application. In the next couple posts we'll move on to implementing simple authorization and authentication and eventually social authentication as well.
+
+Now for the code.
+
+## Database Migrations
+
+A lot of important decisions happen in database design and there is no "right" way to define a user.
+
+For some applications, storing all user-related information in a single table is the most efficient approach. We'll take a slightly different approach and split the user into a table for authentication purposes and a table for supplementary information consistent with a user profile. This will make our system easier to test and ensure that we can extend our User model without having to worry about how our authentication table is structured.
+
+Starting with our migrations file, we'll add a table for our users. We'll need to overhaul our database a bit here, so we'll start by showing our entire migrations file and the changes we need to add to it. Then we'll talk a bit about what's happening and how to manage these changes.
+
+Before we make start writing code, let's go ahead and rollback our migrations.
+
+```bash
+docker ps
+docker exec -it [CONTAINER_ID] bash
+alembic downgrade base
+```
+
+And then we refactor our migration file. Remember that migration filenames will be different from project to project - as alembic is responsible for generating those filenames.
+
+Open up the file that looks like: `db/migrations/versions/12345678654_create_main_tables.py`.
+
+```python
+"""create main tables
+
+Revision ID: 12345678654
+Revises:
+Create Date: 2020-05-05 10:41:35.468471
+
+"""
+from typing import Tuple
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers, used by Alembic
+revision = "12345678654"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def create_updated_at_trigger() -> None:
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION update_updated_at_column()
+            RETURNS TRIGGER AS
+        $$
+        BEGIN
+            NEW.updated_at = now();
+            RETURN NEW;
+        END;
+        $$ language 'plpgsql';
+        """
+    )
+
+
+def timestamps(indexed: bool = False) -> Tuple[sa.Column, sa.Column]:
+    return (
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+            index=indexed,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+            index=indexed,
+        ),
+    )
+
+
+def create_cleanings_table() -> None:
+    op.create_table(
+        "cleanings",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("name", sa.Text, nullable=False, index=True),
+        sa.Column("description", sa.Text, nullable=True),
+        sa.Column("cleaning_type", sa.Text, nullable=False, server_default="spot_clean"),
+        sa.Column("price", sa.Numeric(10, 2), nullable=False),
+        *timestamps(),
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_cleanings_modtime
+            BEFORE UPDATE
+            ON cleanings
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def create_users_table() -> None:
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("username", sa.Text, unique=True, nullable=False, index=True),
+        sa.Column("email", sa.Text, unique=True, nullable=False, index=True),
+        sa.Column("email_verified", sa.Boolean, nullable=False, server_default="False"),
+        sa.Column("salt", sa.Text, nullable=False),
+        sa.Column("password", sa.Text, nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="True"),
+        sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default="False"),
+        *timestamps(),
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_user_modtime
+            BEFORE UPDATE
+            ON users
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def upgrade() -> None:
+    create_updated_at_trigger()
+    create_cleanings_table()
+    create_users_table()
+
+
+def downgrade() -> None:
+    op.drop_table("users")
+    op.drop_table("cleanings")
+    op.execute("DROP FUNCTION update_updated_at_column")
+
+```
+
+Quite a few new things happening here. The biggest change is that we've written a bit of code that makes it easy for us to add timestamps to every table in our database. The `timestamps()` function creates two columns - `created_at` and `updated_at` - that we unpack into both our `cleanings` and `users` table with `*timestamps()`. This will help us track when records are entered into our database and when they're updated. Both of these default to the current moment in time using `sa.func.now()`. We also provide the option to index our timestamps if needed.
+
+We've also written a [PL/pgSQL](https://www.postgresql.org/docs/12/plpgsql-overview.html) trigger that we create for every table in our `create_updated_at_trigger` function. This trigger will run whenever a row in a given table is updated and set the `updated_at` column to that moment in time. Handing the management of updating timestamps over to postgres is relatively straightforward and extremely convenient in the long run.
+
+> For readers unfamiliar with Pl/pgSQL, there are some additional resources included at the end of this post that may help.
+
+Our new `users` table stores all authentication-related information and sets unique constraints on the `email` and `username` columns, along with an [index](https://www.postgresql.org/docs/12/indexes-intro.html). We'll discuss both of these in greater detail shortly, but for now let's go ahead and run our migrations with `alembic upgrade head` and then move on to our Pydantic models.
+
+## Pydantic Models
+
+Moving outward from the database layer, we're going to define a new common model that will help us manage timestamps across our application. Update the `core.py` file with the following.
+
+```python:title=<span>models/core.py</span>
+from typing import Optional
+from datetime import datetime
+from pydantic import BaseModel, validator
+
+
+class CoreModel(BaseModel):
+    """
+    Any common logic to be shared by all models goes here
+    """
+    pass
+
+
+class DateTimeModelMixin(BaseModel):
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    # highlight-start
+    # highlight-end
+    @validator("created_at", "updated_at", pre=True)
+    def default_datetime(cls, value: datetime) -> datetime:
+        return value or datetime.datetime.now()
+
+
+class IDModelMixin(BaseModel):
+    id: int
+
+```
+
+This new mixin - `DateTimeModelMixin` is taking advantage of another pydantic feature - the `validator` decorator - to set a default datetime for both the `created_at` and `updated_at` fields. Feel free to read more about all the things that can be done with [validators here](https://pydantic-docs.helpmanual.io/usage/validators/).
+
+Let's go ahead and use that mixin in a new models file: `user.py`.
+
+As usual, create the file:
+
+```bash
+touch backend/app/models/user.py
+```
+
+And then add the following:
+
+```python:title=<span>models/user.py</span>
+import string
+from typing import Optional
+
+from pydantic import EmailStr, constr, validator
+
+from app.models.core import DateTimeModelMixin, IDModelMixin, CoreModel
+
+
+# simple check for valid username
+def validate_username(username: str) -> str:
+    allowed = string.ascii_letters + string.digits + "-" + "_"
+    assert all(char in allowed for char in username), "Invalid characters in username."
+    assert len(username) >= 3, "Username must be 3 characters or more."
+    return username
+
+
+class UserBase(CoreModel):
+    """
+    Leaving off password and salt from base model
+    """
+    email: Optional[EmailStr]
+    username: Optional[str]
+    email_verified: bool = False
+    is_active: bool = True
+    is_superuser: bool = False
+
+
+class UserCreate(CoreModel):
+    """
+    Email, username, and password are required for registering a new user
+    """
+    email: EmailStr
+    password: constr(min_length=7, max_length=100)
+    username: str
+
+    # highlight-start
+    # highlight-end
+    @validator("username", pre=True)
+    def username_is_valid(cls, username: str) -> str:
+        return validate_username(username)
+
+
+class UserUpdate(CoreModel):
+    """
+    Users are allowed to update their email and/or username
+    """
+    email: Optional[EmailStr]
+    username: Optional[str]
+
+    # highlight-start
+    # highlight-end
+    @validator("username", pre=True)
+    def username_is_valid(cls, username: str) -> str:
+        return validate_username(username)
+
+
+class UserPasswordUpdate(CoreModel):
+    """
+    Users can change their password
+    """
+    password: constr(min_length=7, max_length=100)
+    salt: str
+
+
+class UserInDB(IDModelMixin, DateTimeModelMixin, UserBase):
+    """
+    Add in id, created_at, updated_at, and user's password and salt
+    """
+    password: constr(min_length=7, max_length=100)
+    salt: str
+
+
+class UserPublic(IDModelMixin, DateTimeModelMixin, UserBase):
+    pass
+
+```
+
+Most attributes are simply echoed from our migrations file, with sensitive information excluded from as many models as we can. We're requiring that new users provide an email address, username, and password, while existing users are able to udpate their email address and/or username at any point. We also want to provide users the ability to reset their password.
+
+An important detail to list is that we're leaving password and salt out of the `UserBase` and `UserPublic` models, ensuring that this information never leaves the backend.
+
+Users have `email_verified` default to `False` until we can confirm that their email is valid, while `is_active` and `is_superuser` default to `True` and `False`, respectively.
+
+There's also some additional validation we're doing with pydantic. We've imported the `constr` typed and used that for every password attribute across our models. The `constr` type is one of pydantic's [constrained types](https://pydantic-docs.helpmanual.io/usage/types/#constrained-types) and it stands for **constrained string**. Constrained strings offer the ability to set minimum and maximum lengths on any string value, along with other validations. We're ensuring that all passwords have a minimum length of 7 and a maximum length of 100. Not sure anyone would ever have a password with 100 characters, but it's nice to show off that feature.
+
+We're also doing custom validation on usernames with our `validate_username` function. We check to make sure that every character in a username is either alphanumeric, or is an underscore or hyphen. We also check to make sure that usernames are at least 3 characters long. Though we've extracted that logic into it's own function, pydantic actually gives us a way to do that with built in string validators. The same logic can be accomplished with regex and the same `constr` field type we used before. We could then refactor `UserCreate` and `UserUpdate` like so:
+
+```python
+
+class UserCreate(CoreModel):
+    """
+    Email, username, and password are required for registering a new user
+    """
+    email: EmailStr
+    password: constr(min_length=7, max_length=100)
+    username: constr(min_length=3, regex="^[a-zA-Z0-9_-]+$")
+
+
+class UserUpdate(CoreModel):
+    """
+    Users are allowed to update their email and username
+    """
+    email: Optional[EmailStr]
+    username: Optional[constr(min_length=3, regex="^[a-zA-Z0-9_-]+$")]
+
+```
+
+We can then remove the `import string` statement and the `validator` import from the top of the file, along with the `validate_username` function. Depending on the complexity of the validation needed, feel free to use whatever method fits.
+
+Let's head over to our tests.
+
+## Testing User Registration
+
+Before we start implementing user registration, let's make one thing very clear:
+
+NEVER, EVER, EVER store user passwords in plain text.
+
+This single mistake is one of the worst decisions that can be made for an application. It's easy to avoid and absurdly costly if things go wrong. Having said that, we're going to do just that here, before we remedy it in the next post.
+
+Now go ahead and create the testing file:
+
+```bash
+touch backend/tests/test_users.py
+```
+
+Then add an additional testing class to test for the existence of the user routes.
+
+```python:title=<span>tests/test_users.py</span>
+import pytest
+
+from httpx import AsyncClient
+from fastapi import FastAPI
+
+from starlette.status import (
+    HTTP_200_OK,
+    HTTP_201_CREATED,
+    HTTP_400_BAD_REQUEST,
+    HTTP_401_UNAUTHORIZED,
+    HTTP_404_NOT_FOUND,
+    HTTP_422_UNPROCESSABLE_ENTITY,
+)
+
+from app.models.user import UserCreate, UserInDB
+
+
+pytestmark = pytest.mark.asyncio
+
+
+class TestUserRoutes:
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient) -> None:
+        new_user = {"email": "test@email.io", "username": "test_username", "password": "testpassword"}
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code != HTTP_404_NOT_FOUND
+
+```
+
+Run the tests and watch that one fail. We see the same `starlette.routing.NoMatchFound` that we've run into so often at this point. Let's go ahead and make that route now.
+
+```bash
+touch backend/app/api/routes/users.py
+```
+
+And in the new file:
+
+```python:title=<span>api/routes/users.py</span>
+from fastapi import Depends, APIRouter, HTTPException, Path, Body
+from starlette.status import HTTP_201_CREATED, HTTP_404_NOT_FOUND
+
+from app.api.dependencies.database import get_repository
+from app.models.user import UserCreate, UserPublic
+
+from app.db.repositories.users import UsersRepository
+
+
+router = APIRouter()
+
+
+# highlight-start
+# highlight-end
+@router.post("/", response_model=UserPublic, name="users:register-new-user", status_code=HTTP_201_CREATED)
+async def register_new_user(
+    new_user: UserCreate = Body(..., embed=True),
+    user_repo: UsersRepository = Depends(get_repository(UsersRepository)),
+) -> UserPublic:
+    created_user = await user_repo.register_new_user(new_user=new_user)
+
+    return created_user
+
+```
+
+Simple enough. We're sending the new user over to our `UsersRepository` and returning the created user. Let's register these routes in our api router.
+
+```python:title=<span>api/routes/__init__.py</span>
+from fastapi import APIRouter
+
+from app.api.routes.cleanings import router as cleanings_router
+from app.api.routes.users import router as users_router
+
+
+router = APIRouter()
+
+
+router.include_router(cleanings_router, prefix="/cleanings", tags=["cleanings"])
+router.include_router(users_router, prefix="/users", tags=["users"])
+
+```
+
+As soon as we save that file, we should see an `ImportError` pop up in our terminal. Observant readers might have noticed that we never created our UsersRepository file, so our error makes a lot of sense.
+
+Let's go ahead and do that now.
+
+```bash
+touch backend/app/db/repositories/users.py
+```
+
+Then add just enough to that new file to get our tests to pass:
+
+```python:title=<span>db/repositories/users.py</span>
+from app.db.repositories.base import BaseRepository
+from app.models.user import UserCreate, UserUpdate, UserInDB
+
+class UsersRepository(BaseRepository):
+    async def register_new_user(self, *, new_user: UserCreate) -> UserInDB:
+        return None
+
+```
+
+Run our tests again and watch them pass. We know that this code isn't really valid, but it'll do for now.
+
+Now it's time to flesh out the UsersRepository with actual registration logic.
+
+We'll start by writing more tests.
+
+Head into the `test_users.py` file and add a new class:
+
+```python:title=<span>tests/test_users.py</span>
+# ...other code
+
+from databases import Database
+from app.db.repositories.users import UsersRepository
+
+
+# ...other code
+
+class TestUserRegistration:
+    async def test_users_can_register_successfully(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        db: Database,
+    ) -> None:
+        user_repo = UsersRepository(db)
+        new_user = {"email": "shakira@shakira.io", "username": "shakirashakira", "password": "chantaje"}
+
+        # make sure user doesn't exist yet
+        user_in_db = await user_repo.get_user_by_email(email=new_user["email"])
+        assert user_in_db is None
+
+        # send post request to create user and ensure it is successful
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code == HTTP_201_CREATED
+
+        # ensure that the user now exists in the db
+        user_in_db = await user_repo.get_user_by_email(email=new_user["email"])
+        assert user_in_db is not None
+        assert user_in_db.email == new_user["email"]
+        assert user_in_db.username == new_user["username"]
+
+        # check that the user returned in the response is equal to the user in the database
+        created_user = UserInDB(**res.json(), password="whatever", salt="123").dict(exclude={"password", "salt"})
+        assert created_user == user_in_db.dict(exclude={"password", "salt"})
+
+    # highlight-start
+    # highlight-end
+    @pytest.mark.parametrize(
+        "attr, value, status_code",
+        (
+            ("email", "shakira@shakira.io", 400),
+            ("username", "shakirashakira", 400),
+            ("email", "invalid_email@one@two.io", 422),
+            ("password", "short", 422),
+            ("username", "shakira@#$%^<>", 422),
+            ("username", "ab", 422),
+        )
+    )
+    async def test_user_registration_fails_when_credentials_are_taken(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        db: Database,
+        attr: str,
+        value: str,
+        status_code: int,
+    ) -> None:
+        new_user = {"email": "nottaken@email.io", "username": "not_taken_username", "password": "freepassword"}
+        new_user[attr] = value
+
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code == status_code
+
+```
+
+We're testing two situations here.
+
+The first is the case when a user submits valid credentials. We send a POST request with proper credentials and then we check that the user was created in our database, and that the endpoint returns a user with the shape we expect to see. We exclude the `password` and `salt` attributes from the user record queried from our database, as those should not be made available by any request that returns a user.
+
+The second case is when a user submits credentials where either the email or password has already been taken, or one of the credentials will cause pydantic to throw a validation error. We expect that our endpoint returns a 400 status code when the username or email is already taken, and that a 422 status code is returned when a validation error is seen.
+
+Run the tests and watch them fail. We get a nice error message telling us that the `UsersRepository` object has no attribute `get_user_by_email`.
+
+Let's fix that.
+
+```python:title=<span>db/repositories/users.py</span>
+from pydantic import EmailStr
+from fastapi import HTTPException, status
+
+from app.db.repositories.base import BaseRepository
+from app.models.user import UserCreate, UserUpdate, UserInDB, UserPublic
+
+
+GET_USER_BY_EMAIL_QUERY = """
+    SELECT id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at
+    FROM users
+    WHERE email = :email;
+"""
+
+GET_USER_BY_USERNAME_QUERY = """
+    SELECT id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at
+    FROM users
+    WHERE username = :username;
+"""
+
+REGISTER_NEW_USER_QUERY = """
+    INSERT INTO users (username, email, password, salt)
+    VALUES (:username, :email, :password, :salt)
+    RETURNING id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at;
+"""
+
+
+class UsersRepository(BaseRepository):
+    async def get_user_by_email(self, *, email: EmailStr) -> UserInDB:
+        user_record = await self.db.fetch_one(query=GET_USER_BY_EMAIL_QUERY, values={"email": email})
+
+        if not user_record:
+            return None
+
+        return UserInDB(**user_record)
+
+    async def get_user_by_username(self, *, username: str) -> UserInDB:
+        user_record = await self.db.fetch_one(query=GET_USER_BY_USERNAME_QUERY, values={"username": username})
+
+        if not user_record:
+            return None
+
+        return UserInDB(**user_record)
+
+    async def register_new_user(self, *, new_user: UserCreate) -> UserInDB:
+        # make sure email isn't already taken
+        if await self.get_user_by_email(email=new_user.email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That email is already taken. Login with that email or register with another one."
+            )
+
+        # make sure username isn't already taken
+        if await self.get_user_by_username(username=new_user.username):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That username is already taken. Please try another one."
+            )
+
+        created_user = await self.db.fetch_one(query=REGISTER_NEW_USER_QUERY, values={**new_user.dict(), "salt": "123"})
+
+        return UserInDB(**created_user)
+
+```
+
+A couple things going on here. Let's start with the `get_user_by_email` and `get_user_by_username` methods. Both take in a single parameter - either `email` or `username` - and query our database for a user where either the email or username matches. We'll use these later on when we're fetching users, but we also define them here so that we can use them in our `register_new_user` method.
+
+Each time a new user is created, we first check to make sure that neither the email or password is already taken. If either returns a user, we raise FastAPI's `HTTPException` with the appropriate error message. Otherwise, we create the user with the provided credentials and a fake `salt`. We'll add a real one when we handle passwords correctly in the next post.
+
+> REMINDER: NEVER STORE PASSWORDS IN PLAIN TEXT LIKE WE ARE HERE. There's a reason we're hardcoding in a fake salt here. For actual authentication, we'll want to generate a salt and hash the password with `passlib` and `bcrypt`.
+
+Run the tests again and watch them all pass. Voila!
+
+We're now ready to start authenticating users.
+
+## Wrapping Up and Resources
+
+Now that we're starting to sign users up for our application, we have a lot of new decisions to make. Fortunately Pydantic and FastAPI make our work a whole lot easier. Up next, we'll give users the ability to login by sending JWT tokens to users who have registered or provided valid login credentials.
+
+- FastAPI Users [repo](https://github.com/frankie567/fastapi-users)
+- PL/pgSQL [docs](https://www.postgresql.org/docs/12/plpgsql-overview.html)
+- The Art of Postgres [Book](https://theartofpostgresql.com/) - One of the best reference guides for most postgres stuff
+- [Quick Guide to Writing PLPGSQL Functions](https://www.postgresonline.com/journal/archives/58-Quick-Guide-to-writing-PLPGSQL-Functions-Part-1.html)
+- Pydantic [validators](https://pydantic-docs.helpmanual.io/usage/validators/)
+- Pydantic [field types](https://pydantic-docs.helpmanual.io/usage/types/)
+- Toptal: High-performing Apps with Python – [blog post](https://www.toptal.com/python/build-high-performing-apps-with-the-python-fastapi-framework) focused on building a todo app from scratch with FastAPI using the SQLAlchemy ORM.
+
+## Github Repo
+
+All code up to this point can be found here:
+
+- https://github.com/Jastor11/phresh-tutorial/tree/part-6-designing-a-robust-user-model-in-a-fastapi-app

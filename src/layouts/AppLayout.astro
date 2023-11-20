@@ -1,0 +1,42 @@
+---
+import BaseLayout from "./BaseLayout.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  title?: string
+  description?: string
+  isLanding?: boolean
+  className?: string
+  image?: string
+  excludeOpenGraph?: boolean
+  excludeTwitter?: boolean
+}
+
+const { isLanding, className, title, description, image, excludeOpenGraph, excludeTwitter } = Astro.props
+
+const mainClassnames = cn([
+  "flex-1",
+  "w-full",
+  "max-w-[100vw]",
+  "h-full",
+  // 7 rem is Navbar height for mobile
+  // 6 rem is Navbar height for sm screen
+  "min-h-[calc(100vh_-_7rem)] sm:min-h-[calc(100vh_-_6rem)]",
+  "relative",
+  className,
+])
+---
+
+<BaseLayout
+  title={title}
+  description={description}
+  isLanding={isLanding}
+  image={image}
+  excludeOpenGraph={excludeOpenGraph}
+  excludeTwitter={excludeTwitter}
+>
+  <slot name="head" slot="head" />
+  <main class={mainClassnames}>
+    <slot />
+  </main>
+</BaseLayout>

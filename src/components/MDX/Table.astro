@@ -1,0 +1,24 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"table"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  "w-full max-w-screen-90% overflow-hidden",
+  "mobile:mx-auto mobile:my-0",
+  "md:min-w-min",
+  "elevate-1",
+  className,
+  //
+])
+---
+
+<table class={elementClassnames} {...props}>
+  <slot />
+</table>

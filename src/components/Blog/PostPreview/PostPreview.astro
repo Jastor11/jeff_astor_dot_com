@@ -1,0 +1,55 @@
+---
+import type { UndrawSvgName } from "@/lib/undraw"
+import UndrawSvg from "@/components/Media/UndrawSvg.astro"
+import InternalLink from "@/components/Common/InternalLink.astro"
+import { prettyDate } from "@/lib/dates"
+import * as links from "@/lib/links"
+
+import { cn } from "@/utils/styles"
+
+import type { PostPreviewProps } from "./PostPreview.interface"
+import { postPreviewStyles } from "./PostPreview.interface"
+
+type Props = PostPreviewProps & {
+  //
+}
+
+const {
+  post,
+  // ...props
+} = Astro.props
+
+const postData = post.data
+const postCategory = postData.category as String
+const postTitle = postData.title as String
+const postDateString = postData.date
+const postUrl = links.formatBlogLinkFromSlug(post.slug)
+const postDate = prettyDate(postDateString)
+---
+
+<InternalLink href={postUrl} class={postPreviewStyles.wrapperClassnames}>
+  <div
+    class={cn(
+      postPreviewStyles.postPreviewCardMediaClassnames,
+      post.data.category === "FastAPI" ? "" : "flex justify-center"
+    )}
+  >
+    <div class={postPreviewStyles.postPreviewImageWrapperClassnames}>
+      {postCategory ? <UndrawSvg className="w-full h-full" name={postCategory as UndrawSvgName} /> : null}
+    </div>
+    <div class="">
+      <span class={postPreviewStyles.categoryLabelClassnames}>
+        {postCategory}
+      </span>
+    </div>
+  </div>
+
+  <div class={postPreviewStyles.postPreviewInfoClassnames}>
+    <h4 class={postPreviewStyles.postTitleClassnames}>
+      {postTitle}
+    </h4>
+    <div class="post-meta flex items-center justify-between">
+      <h5 class={postPreviewStyles.postDateClassnames}>{postDate}</h5>
+    </div>
+  </div>
+</InternalLink>

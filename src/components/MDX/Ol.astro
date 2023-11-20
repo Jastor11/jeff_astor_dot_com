@@ -1,0 +1,22 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"ol"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  styles.listStyles,
+  "list-decimal",
+  className,
+  //
+])
+---
+
+<ol class={elementClassnames} {...props}>
+  <slot />
+</ol>

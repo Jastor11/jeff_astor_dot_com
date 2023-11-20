@@ -1,0 +1,28 @@
+---
+import type { OpenGraphSchema } from "./AstroSEO.astro"
+import * as parseUtils from "@/utils/parse-utils"
+
+type Props = {
+  // openGraph?: OpenGraphSchema
+  basic?: OpenGraphSchema["basic"]
+}
+const props = Astro.props
+
+// const openGraphSchema = props.openGraph ?? {}
+// const basic = ("basic" in openGraphSchema ? openGraphSchema.basic : {}) as OpenGraphSchema["basic"]
+const basic = parseUtils.isDefined(props.basic) ? props.basic : null
+
+const basicTitle = parseUtils.isDefined(basic) ? basic.title : null
+const basicType = parseUtils.isDefined(basic) ? basic.type : null
+const basicImage = parseUtils.isDefined(basic) ? basic.image : null
+const basicUrl = parseUtils.isDefined(basic) ? basic.url : null
+---
+
+<meta property="og:url" content={basicUrl ?? Astro.url.href} />
+<meta property="og:type" content={basicType ?? "article"} />
+<meta property="og:title" content={basicTitle} />
+<!-- <meta property="og:description" content={description} /> -->
+<!-- <meta property="og:image" content={basicUrl} /> -->
+
+<meta property="og:image" content={basicImage} />
+<!-- <meta property="og:url" content={openGraph.basic.url || Astro.url.href} /> -->

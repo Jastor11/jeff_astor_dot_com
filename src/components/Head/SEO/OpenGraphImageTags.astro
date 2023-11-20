@@ -1,0 +1,32 @@
+---
+import type { OpenGraphSchema } from "./AstroSEO.astro"
+import * as parseUtils from "@/utils/parse-utils"
+
+type Props = {
+  // openGraph?: OpenGraphSchema
+  basic?: OpenGraphSchema["basic"]
+  image?: OpenGraphSchema["image"]
+}
+const props = Astro.props
+
+const basic = parseUtils.isDefined(props.basic) ? props.basic : null
+const image = parseUtils.isDefined(props.image) ? props.image : null
+
+const basicImage = parseUtils.isDefined(basic) ? basic.image : null
+const secureUrl = parseUtils.isDefined(image) ? image.secureUrl : null
+const type = parseUtils.isDefined(image) ? image.type : null
+const width = parseUtils.isDefined(image) ? image.width : null
+const height = parseUtils.isDefined(image) ? image.height : null
+const alt = parseUtils.isDefined(image) ? image.alt : null
+---
+
+<meta property="og:image:url" content={basicImage} />
+{secureUrl ? <meta property="og:image:secure_url" content={secureUrl} /> : null}
+{type ? <meta property="og:image:type" content={type} /> : null}
+{width ? <meta property="og:image:width" content={width ? String(width) : undefined} /> : null}
+{
+  parseUtils.isDefined(height) ? (
+    <meta property="og:image:height" content={height ? String(height) : undefined} />
+  ) : null
+}
+{parseUtils.isDefined(alt) ? <meta property="og:image:alt" content={alt} /> : null}

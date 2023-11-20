@@ -1,0 +1,22 @@
+---
+import { Image, type LocalImageProps } from "astro:assets"
+
+// type ImageProps
+
+type Props = {
+  className?: string
+  alt?: string
+  src?: LocalImageProps["src"]
+  figCaption?: string
+}
+
+const { className, src, alt, figCaption } = Astro.props
+---
+
+<figure class={className}>
+  {src ? <Image src={src} alt={alt ?? "jeffastor.com image"} /> : null}
+  <slot>
+    <span></span>
+  </slot>
+  {figCaption ? <figcaption class="text-center py-1">{figCaption}</figcaption> : null}
+</figure>

@@ -1,0 +1,70 @@
+---
+import SocialIcons from "@/components/Socials/SocialIcons.astro"
+import { config } from "@/core/config"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  small?: boolean
+  className?: string
+}
+
+const { small, className, ...props } = Astro.props
+
+const copyright = `Copyright © ${new Date().getFullYear()} JeffAstor.com`
+
+const wrapperClassnames = cn([
+  "text-center lg:text-right",
+  "flex flex-col flex-1 justify-end gap-4",
+  "px-4 py-2",
+  className,
+])
+
+const titleClassnames = cn([
+  //
+  "font-black",
+  "font-heading",
+  "text-white",
+  "text-2xl tablet:text-3xl",
+  "uppercase",
+])
+
+const subtitleLinesClassnames = cn([
+  "ml-auto",
+  "twelve:max-w-[420px]",
+  //
+])
+
+const subtitleLineClassnames = cn([
+  "text-white text-sm font-extralight",
+  "text-lg xl:text-xl",
+  //
+])
+
+const copyrightClassnames = cn(["mt-2", "text-lg"])
+
+const subtitleLines = config.sub_title.split(".").filter((line) => line.length > 0)
+---
+
+<div class={wrapperClassnames} {...props}>
+  {small ? null : <h2 class:list={titleClassnames}>hey i'm jeff astor</h2>}
+
+  <div class={subtitleLinesClassnames}>
+    {
+      subtitleLines.map((line, idx) => (
+        <p class:list={[subtitleLineClassnames, idx === subtitleLines.length - 1 ? "" : "whitespace-nowrap"]}>
+          {line}.
+        </p>
+      ))
+    }
+  </div>
+
+  <SocialIcons size={"sm"} className="grid grid-flow-row grid-cols-8" />
+
+  {
+    small ? null : (
+      <div class={copyrightClassnames}>
+        <span class="text-sm tablet:text-base text-white">{copyright}</span>
+      </div>
+    )
+  }
+</div>

@@ -1,0 +1,150 @@
+---
+import OpenGraphArticleTags from "./OpenGraphArticleTags.astro"
+import OpenGraphBasicTags from "./OpenGraphBasicTags.astro"
+import OpenGraphImageTags from "./OpenGraphImageTags.astro"
+import OpenGraphOptionalTags from "./OpenGraphOptionalTags.astro"
+import ExtendedTags from "./ExtendedTags.astro"
+import TwitterTags from "./TwitterTags.astro"
+import LanguageAlternatesTags from "./LanguageAlternatesTags.astro"
+
+export type TwitterCardType = "summary" | "summary_large_image" | "app" | "player"
+
+export type Link = HTMLLinkElement & {
+  prefetch: boolean
+  crossorigin: string
+}
+
+export type Meta = HTMLMetaElement & {
+  property: string
+}
+
+export type OpenGraphSchema = {
+  basic: {
+    title: string
+    type: string
+    image: string
+    url?: URL | string
+  }
+  optional?: {
+    audio?: string
+    description?: string
+    determiner?: string
+    locale?: string
+    localeAlternate?: string[]
+    siteName?: string
+    video?: string
+  }
+  image?: {
+    url?: URL | string
+    secureUrl?: URL | string
+    type?: string
+    width?: number
+    height?: number
+    alt?: string
+  }
+  article?: {
+    publishedTime?: string
+    modifiedTime?: string
+    expirationTime?: string
+    authors?: string[]
+    section?: string
+    tags?: string[]
+  }
+}
+
+export type Props = {
+  title?: string
+  titleTemplate?: string
+  titleDefault?: string
+  charset?: string
+  description?: string
+  canonical?: URL | string
+  nofollow?: boolean
+  noindex?: boolean
+  languageAlternates?: {
+    href: URL | string
+    hrefLang: string
+  }[]
+  openGraph?: OpenGraphSchema
+  twitter?: {
+    card?: TwitterCardType
+    site?: string
+    creator?: string
+    title?: string
+    description?: string
+    image?: URL | string
+    imageAlt?: string
+  }
+  extend?: {
+    link?: Partial<Link>[]
+    meta?: Partial<Meta>[]
+  }
+  surpressWarnings?: boolean
+}
+
+Astro.props.surpressWarnings = true
+
+const props = Astro.props
+
+function validateProps(props: Props) {
+  if (props.openGraph) {
+    if (
+      !props.openGraph.basic ||
+      props.openGraph.basic.title == null ||
+      props.openGraph.basic.type == null ||
+      props.openGraph.basic.image == null
+    ) {
+      throw new Error(
+        "If you pass the openGraph prop, you have to at least define the title, type, and image basic properties!"
+      )
+    }
+  }
+
+  if (props.title && props.openGraph?.basic.title) {
+    if (props.title == props.openGraph.basic.title && !props.surpressWarnings) {
+      console.warn(
+        "WARNING(astro-seo): You passed the same value to `title` and `openGraph.optional.title`. This is most likely not what you want. See docs for more."
+      )
+    }
+  }
+
+  if (props.openGraph?.basic?.image && !props.openGraph?.image?.alt && !props.surpressWarnings) {
+    console.warn(
+      "WARNING(astro-seo): You defined `openGraph.basic.image`, but didn't define `openGraph.image.alt`. This is stongly discouraged.'"
+    )
+  }
+}
+
+validateProps(Astro.props)
+
+let updatedTitle = ""
+
+if (Astro.props.title) {
+  updatedTitle = Astro.props.title
+  if (Astro.props.titleTemplate) {
+    updatedTitle = Astro.props.titleTemplate.replace(/%s/g, updatedTitle)
+  }
+} else if (Astro.props.titleDefault) {
+  updatedTitle = Astro.props.titleDefault
+}
+
+const languageAlternates = props.languageAlternates ?? []
+---
+
+{updatedTitle ? <title set:html={updatedTitle} /> : null}
+
+{props.charset ? <meta charset={props.charset} /> : null}
+
+<link rel="canonical" href={props.canonical || Astro.url.href} />
+
+{props.description ? <meta name="description" content={props.description} /> : null}
+
+<meta name="robots" content={`${props.noindex ? "noindex" : "index"}, ${props.nofollow ? "nofollow" : "follow"}`} />
+
+{props.openGraph && <OpenGraphBasicTags basic={props.openGraph?.basic} />}
+{props.openGraph?.optional && <OpenGraphOptionalTags optional={props.openGraph?.optional} />}
+{props.openGraph?.image && <OpenGraphImageTags basic={props.openGraph?.basic} image={props.openGraph?.image} />}
+{props.openGraph?.article && <OpenGraphArticleTags article={props.openGraph?.article} />}
+{props.twitter && <TwitterTags twitter={props.twitter} />}
+{props.extend && <ExtendedTags extend={props.extend} />}
+{props.languageAlternates && <LanguageAlternatesTags languageAlternates={languageAlternates} />}

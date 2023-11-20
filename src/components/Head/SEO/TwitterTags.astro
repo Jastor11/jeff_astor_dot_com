@@ -1,0 +1,38 @@
+---
+import * as parseUtils from "@/utils/parse-utils"
+
+type TwitterCardType = "summary" | "summary_large_image" | "app" | "player"
+
+type Props = {
+  twitter?: {
+    card?: TwitterCardType
+    site?: string
+    creator?: string
+    title?: string
+    description?: string
+    image?: URL | string
+    imageAlt?: string
+  }
+}
+
+const props = Astro.props
+
+const card = parseUtils.isDefined(props.twitter) ? props.twitter.card : null
+const site = parseUtils.isDefined(props.twitter) ? props.twitter.site : null
+const title = parseUtils.isDefined(props.twitter) ? props.twitter.title : null
+const image = parseUtils.isDefined(props.twitter) ? props.twitter.image : null
+const imageAlt = parseUtils.isDefined(props.twitter) ? props.twitter.imageAlt : null
+const description = parseUtils.isDefined(props.twitter) ? props.twitter.description : null
+const creator = parseUtils.isDefined(props.twitter) ? props.twitter.creator : null
+
+// const { card, site, title, creator, description, image, imageAlt } =
+//   Astro.props.twitter;
+---
+
+{card ? <meta name="twitter:card" content={card} /> : null}
+{site ? <meta name="twitter:site" content={site} /> : null}
+{title ? <meta name="twitter:title" content={title} /> : null}
+{image ? <meta name="twitter:image" content={image} /> : null}
+{imageAlt ? <meta name="twitter:image:alt" content={imageAlt} /> : null}
+{description ? <meta name="twitter:description" content={description} /> : null}
+{creator ? <meta name="twitter:creator" content={creator} /> : null}

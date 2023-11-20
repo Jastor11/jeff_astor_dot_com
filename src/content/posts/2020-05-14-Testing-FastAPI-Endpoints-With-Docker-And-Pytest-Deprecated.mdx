@@ -1,0 +1,856 @@
+---
+title: "Testing FastAPI Endpoints with Docker and Pytest"
+category: "Testing"
+date: "05/14/2020"
+published: "true"
+slug: "testing-fastapi-endpoints-with-docker-and-pytest-deprecated"
+series: up-and-running-with-fastapi
+deprecated: "true"
+tags:
+  - python
+  - fastapi
+  - server
+  - postgres
+  - docker
+  - pytest
+  - testing
+---
+
+import FastAPISeriesList from "@/components/MDX/series/FastAPI.astro"
+
+Welcome to Part 4 of Up and Running with FastAPI. If you missed part 3, you can find it [here](/blog/hooking-fastapi-endpoints-up-to-a-postgres-database).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={4} />
+
+In the previous post we created our `CleaningsRepository` to act as a database interface for our application, and wrote a single SQL query to insert data into our database. Then we hooked that up to a POST endpoint and created our first cleaning using the interactive docs that FastAPI provides for us. In this post, we'll follow a TDD approach and create a standard GET endpoint. Instead of mocking database actions, we'll spin up a testing container with Docker and run all of our tests against a fresh PostgreSQL database to guarantee that our application is functioning as we expect it to.
+
+## About Testing
+
+When it comes to testing, developers are stupidly opinionated.
+
+"Anything less than 100% code coverage is unsafe" - opinionated senior dev
+
+"Tests are hard to mantain and don't actually catch important bugs" - opinionated dev who doesn't like testing
+
+"We didn't have time to test, but we'll get to it eventually" - almost every dev at one point
+
+"Just use Docker" - senior microservices architect
+
+I don't actually know who's right, but I do know that I like testing.
+
+Yes, you read that correctly. I truly **enjoy** testing.
+
+My first assumptions about any problem are almost always flawed in some way. Tests are my best friend because they help me hone my mental models and allow me to juggle fewer variables in my head at a given time. Offload some of that mental strain to automated testing. You'll thank yourself later.
+
+Especially when I'm just starting on a project, tests highlight my initial misconceptions quickly and give me a more familiar platform for introspection. Since this is a tutorial series on FastAPI, I hope to codify my approach to testing that I've developed mostly from examining these three github repos:
+
+1. FastAPI Template Generation [repo](https://github.com/tiangolo/full-stack-fastapi-postgresql)
+2. FastAPI Users [repo](https://github.com/frankie567/fastapi-users)
+3. Real World Fast API [repo](https://github.com/nsidnev/fastapi-realworld-example-app)
+
+Credit where credit is due.
+
+Now on to the testing.
+
+## TDD and Pytest
+
+Though it's nice to test our code post-hoc to ensure that we're seeing the behavior we expect, there's definitely a better approach. Test-driven development (TDD) offers a clear guiding principle when developing applications: write the test first, then write enough code to make it pass. We'll follow this process as we build out the rest of our endpoints.
+
+As for actually writing and running tests, we'll take advantage of [pytest](https://docs.pytest.org/en/latest/) - a mature, full-featured Python testing tool that helps you write better programs. At least, that's how they put it. Setting up `pytest` is straightforward.
+
+First, we'll update our `requirements.txt` file with our new testing dependencies. There's quite a few new additions here. Don't worry, we'll get to them all in time.
+
+```text:title=<span>requirements.txt</span>
+# app
+fastapi==0.55.1
+uvicorn==0.11.3
+pydantic==1.4
+email-validator==1.1.1
+# db
+databases[postgresql]==0.4.2
+SQLAlchemy==1.3.16
+alembic==1.4.2
+
+# dev
+pytest==5.4.2
+pytest-asyncio==0.12.0
+pytest-xdist==1.32.0
+httpx==0.12.1
+asgi-lifespan==1.0.0
+docker==4.2.0
+
+```
+
+With these new dependencies in place, we'll need to rebuild our container.
+
+```bash
+docker-compose up --build
+```
+
+While we wait for our build to complete, let's take a look at what we've just installed:
+
+- `pytest` - our testing framework
+- `pytest-asyncio` - provides utilities for testing asynchronous code
+- `pytest-xdist` - a distributed testing plugin we'll use later on
+- `httpx` - provides an async request client for testing endpoints
+- `asgi-lifespan` - allows testing async applications without having to spin up an ASGI server
+- `docker` - A Python library for the Docker Engine API. It lets us spin up containers from within our application.
+
+When used in conjunction, these packages can be used to construct a robust, extensible testing system for FastAPI applications.
+
+> Note: Readers unfamiliar with Pytest are highly recommended to read the docs linked above on configuring environments and using fixtures.
+
+Our tests will live in their own directory, under `backend/tests` - so we should create that directory if we haven't already. We'll also need to add three new files.
+
+```bash
+touch backend/tests/__init__.py
+touch backend/tests/conftest.py
+touch backend/tests/test_cleanings.py
+```
+
+In our newly created `conftest.py`, we'll add some code needed to configure our testing environment. There is a lot going on here, so we'll write the code first, and then dissect it.
+
+```python:title=<span>conftest.py</span>
+import warnings
+import uuid
+import os
+
+import pytest
+import docker as pydocker
+from asgi_lifespan import LifespanManager
+
+from fastapi import FastAPI
+from httpx import AsyncClient
+from databases import Database
+
+import alembic
+from alembic.config import Config
+
+
+# highlight-start
+# highlight-end
+@pytest.fixture(scope="session")
+def docker() -> pydocker.APIClient:
+    # base url is the unix socket we use to communicate with docker
+    return pydocker.APIClient(base_url="unix://var/run/docker.sock", version="auto")
+
+
+# highlight-start
+# highlight-end
+@pytest.fixture(scope="session", autouse=True)
+def postgres_container(docker: pydocker.APIClient) -> None:
+    """
+    Use docker to spin up a postgres container for the duration of the testing session.
+
+    Kill it as soon as all tests are run.
+
+    DB actions persist across the entirety of the testing session.
+    """
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+    # pull image from docker
+    image = "postgres:12.1-alpine"
+    docker.pull(image)
+
+    # create the new container using
+    # the same image used by our database
+    container = docker.create_container(
+        image=image,
+        name=f"test-postgres-{uuid.uuid4()}",
+        detach=True,
+    )
+
+    docker.start(container=container["Id"])
+
+    config = alembic.config.Config("alembic.ini")
+
+    try:
+        os.environ["DB_SUFFIX"] = "_test"
+        alembic.command.upgrade(config, "head")
+        yield container
+        alembic.command.downgrade(config, "base")
+    finally:
+        # remove container
+        docker.kill(container["Id"])
+        docker.remove_container(container["Id"])
+
+
+# Create a new application for testing
+@pytest.fixture
+def app() -> FastAPI:
+    from app.api.server import get_application
+
+    return  get_application()
+
+
+# Grab a reference to our database when needed
+@pytest.fixture
+def db(app: FastAPI) -> Database:
+    return app.state._db
+
+
+# Make requests in our tests
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncClient:
+    async with LifespanManager(app):
+        async with AsyncClient(
+            app=app,
+            base_url="http://testserver",
+            headers={"Content-Type": "application/json"}
+        ) as client:
+            yield client
+
+```
+
+Alright, that's a lot of stuff. Let's break down what's happening in pieces.
+
+We start by defining a `docker` [fixture](https://docs.pytest.org/en/latest/fixture.html) where we return a docker `APIClient` using `unix://var/run/docker.sock` as the url. We set the scope to session so that it persists across the testing session. So where does that `base_url` come from?
+
+If you look in the `docker-compose.yml` file, you'll see that we have this line of code under the `volumes` section of the `server` service.
+
+```yml:title=<span><span>docker-compose.yml</span></span>
+version: '3.7'
+
+services:
+  server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend/:/backend/
+      - /var/run/docker.sock:/var/run/docker.sock  # highlight-line
+    command: uvicorn app.api.server:app --reload --workers 1 --host 0.0.0.0 --port 8000
+    env_file:
+      - ./backend/.env
+    ports:
+      - 8000:8000
+    depends_on:
+      - db
+
+  db:
+    image: postgres:12.1-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    env_file:
+      - ./backend/.env
+    ports:
+      - 5432:5432
+
+volumes:
+    postgres_data:
+
+```
+
+This is essentially the Unix socket that the Docker daemon listens to by default. We're using it here to communicate with the daemon from within our currently running container to spin up a new one that will host our testing application.
+
+The next fixture, `postgres_container`, is the actual Docker container we spin up to host our application in. We pull the proper image from Docker hub, tell Docker to create a container from that image, and start it up. Next set the `DB_SUFFIX` environment variable to `_test`, so that our testing database will be in use during the session. We Then grab our alembic migration config and run all our migrations before yielding our container. After we're finished testing, we rollback our migrations and kill the container.
+
+We'll need to use this for every test, so we specify the `autouse` parameter to `True` in the `pytest.fixture` decorator.
+
+Our `app` and `db` fixtures are standard. We instantiate a new FastAPI app and grab a reference to the database connection in case we need it. In our `client` fixture, we're couping `LifespanManager` and `AsyncClient` to provide a clean testing client that can send requests to our running FastAPI application. This pattern is adapted directly from the example on the `asgi-lifespan` Github [repo](https://github.com/florimondmanca/asgi-lifespan).
+
+This might seem overwhelming - and it is - but most of the hard work is out of the way. Now we can actually get down to writing some tests for our Cleanings resource. We'll write one test that should pass and one test that should fail.
+
+## Updating Our Database Config
+
+We'll also need to update some of our database configuration. Open up the `db/tasks.py` file.
+
+```python:title=<span>db/tasks.py</span>
+import os  # highlight-line
+from fastapi import FastAPI
+from databases import Database
+from app.core.config import DATABASE_URL
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def connect_to_db(app: FastAPI) -> None:
+    # highlight-start
+    db_url = f"""{DATABASE_URL}{os.environ.get("DB_SUFFIX", "")}"""
+    database = Database(db_url, min_size=2, max_size=10)
+    # highlight-end
+
+    try:
+        await database.connect()
+        app.state._db = database
+    except Exception as e:
+        logger.warn("--- DB CONNECTION ERROR ---")
+        logger.warn(e)
+        logger.warn("--- DB CONNECTION ERROR ---")
+
+
+async def close_db_connection(app: FastAPI) -> None:
+    try:
+        await app.state._db.disconnect()
+    except Exception as e:
+        logger.warn("--- DB DISCONNECT ERROR ---")
+        logger.warn(e)
+        logger.warn("--- DB DISCONNECT ERROR ---")
+
+```
+
+In the `connect_to_db` function we're using the **databases** package to establish a connection to our postgresql db with the database url string we configured in our `core/config.py` file. If we have an environment variable corresponding to the suffix we want placed at the end of the url, we concatenate it (Example: turn `postgres` into `postgres_test`). If `os.environ` has no `DB_SUFFIX`, then we default to an empty string. This helps us use the testing database for our testing session, and our regular database otherwise.
+
+Next, we'll open up the `db/migrations/env.py` file.
+
+```python:title=<span>db/migrations/env.py</span>
+import pathlib
+import sys
+import os  # highlight-line
+
+# highlight-start
+import alembic
+from sqlalchemy import engine_from_config, create_engine, pool
+from psycopg2 import DatabaseError
+# highlight-end
+
+from logging.config import fileConfig
+import logging
+
+# we're appending the app directory to our path here so that we can import config easily
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[3]))
+
+# highlight-start
+from app.core.config import DATABASE_URL, POSTGRES_DB  # noqa
+# highlight-end
+
+# Alembic Config object, which provides access to values within the .ini file
+config = alembic.context.config
+
+# Interpret the config file for logging
+fileConfig(config.config_file_name)
+logger = logging.getLogger("alembic.env")
+
+
+def run_migrations_online() -> None:
+    """
+    Run migrations in 'online' mode
+    """
+    # highlight-start
+    db_suffix = os.environ.get("DB_SUFFIX", "")
+    db_url = f"{DATABASE_URL}{db_suffix}"
+
+    # handle testing config for migrations
+    if "test" in db_suffix:
+        # connect to primary db
+        default_engine = create_engine(str(DATABASE_URL), isolation_level="AUTOCOMMIT")
+        # drop testing db if it exists and create a fresh one
+        with default_engine.connect() as default_conn:
+            default_conn.execute(f"DROP DATABASE IF EXISTS {POSTGRES_DB}{db_suffix}")
+            default_conn.execute(f"CREATE DATABASE {POSTGRES_DB}{db_suffix}")
+    # highlight-end
+
+    connectable = config.attributes.get("connection", None)
+    config.set_main_option("sqlalchemy.url", str(db_url))
+
+    if connectable is None:
+        connectable = engine_from_config(
+            config.get_section(config.config_ini_section),
+            prefix="sqlalchemy.",
+            poolclass=pool.NullPool,
+        )
+
+    with connectable.connect() as connection:
+        alembic.context.configure(
+            connection=connection,
+            target_metadata=None
+        )
+
+        with alembic.context.begin_transaction():
+            alembic.context.run_migrations()
+
+
+def run_migrations_offline() -> None:
+    """
+    Run migrations in 'offline' mode.
+    """
+    # highlight-start
+    db_suffix = os.environ.get("DB_SUFFIX", "")
+
+    if "test" in db_suffix:
+        raise DatabaseError("Running testing migrations offline currently not permitted.")
+    # highlight-end
+
+    alembic.context.configure(url=str(DATABASE_URL))
+
+    with alembic.context.begin_transaction():
+        alembic.context.run_migrations()
+
+
+if alembic.context.is_offline_mode():
+    logger.info("Running migrations offline")
+    run_migrations_offline()
+else:
+    logger.info("Running migrations online")
+    run_migrations_online()
+
+```
+
+Now we've configured our migrations file to use the default database plus whatever suffix is specified for it. When our testing session begins, the `DB_SUFFIX` environment variable will be set to `_test` and a `postgres_test` database will be created. Then the migrations will be run for that database before our tests can be run against it.
+
+There's an interesting block of code here that should probably be explained.
+
+```python
+if "test" in db_suffix:
+    # connect to primary db
+    default_engine = create_engine(str(DATABASE_URL), isolation_level="AUTOCOMMIT")
+    # drop testing db if it exists and create a fresh one
+    with default_engine.connect() as default_conn:
+        default_conn.execute(f"DROP DATABASE IF EXISTS {POSTGRES_DB}{db_suffix}")
+        default_conn.execute(f"CREATE DATABASE {POSTGRES_DB}{db_suffix}")
+```
+
+So what's happening here? We first connect to our default database with credentials we know are valid. We specify the `"AUTOCOMMIT"` option for `isolation_level` to avoid manual transaction management when creating databses. Sqlalchemy always tries to run queries in a transaction, and postgres does not allow users to create databases inside transaction. To get around that, we end each open transaction automatically after execution. That allows us to drop a database, and then create a new one inside of our default connection.
+
+As soon as we're done there, we move on to connecting to the database we want and off we go!
+
+## Writing Tests
+
+Add this code to the `test_cleanings.py` file:
+
+```python:title=<span>test_cleanings.py</span>
+import pytest
+
+from httpx import AsyncClient
+from fastapi import FastAPI
+
+from starlette.status import HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY
+
+
+class TestCleaningsRoutes:
+    # highlight-start
+    # highlight-end
+    @pytest.mark.asyncio
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code != HTTP_404_NOT_FOUND
+
+    # highlight-start
+    # highlight-end
+    @pytest.mark.asyncio
+    async def test_invalid_input_raises_error(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code != HTTP_422_UNPROCESSABLE_ENTITY
+
+```
+
+This is the cool part. We've written a simple class that will be used to test that the routes associated with the Cleanings resource exist, and that they behave how we expect them to. We're using the `@pytest.mark.asyncio` decorator on each class method so that `pytest` can deal with asynchronous test functions.
+
+Each class method has two parameters - `app` and `client`. Because we created fixtures in our `conftest.py` file with the same name, Pytest makes these available to any test function. Each test method also automatically uses the `postgres_container` fixture, so we don't need to declare that anywhere.
+
+Fixtures might seem like magic at first, but The pytest docs state:
+
+> "Fixtures have explicit names and are activated by declaring their use from test functions, modules, classes or whole projects. Fixtures are implemented in a modular manner, as each fixture name triggers a fixture function which can itself use other fixtures. Test functions can receive fixture objects by naming them as an input argument."
+
+We'll use fixtures throughout our tests, so we'll get a lot of practice using them.
+
+Our first test uses the `httpx` client we created and issues a POST request to the route with the name of `"cleanings:create-cleaning"`. If you look back at our `app/api/routes/cleanings.py` file, you'll see that name in the decorator of our POST route. Anyone familiar with `Django` will recognize this pattern, as it mirrors Django's url reversing system. Using this pattern means we don't have to remember exact paths and can instead rely on the name of the route to send HTTP requests.
+
+We're asserting that we don't get a 404 response when this request is sent, and we expect this test to pass.
+
+The second test sends the same request, but expects the response to not include a 422 status code. FastAPI will return 422 status codes whenever the POST body includes an input with an invalid shape. Remember how FastAPI validates all input models using Pydantic? The models we write will determine the shape of the data we expect to receive. Anything else throws a 422.
+
+This test should error out, as FastAPI expects our empty dictionary to have the shape of the `CleaningCreate` model we defined earlier.
+
+We'll run our tests by entering bash commands into our running server container.
+
+```bash
+docker ps
+docker exec -it [CONTAINER_ID] bash
+```
+
+Then, run the `pytest -v` command in bash.
+
+```bash
+pytest -v
+```
+
+This will spin up your container and start executing your tests. The first should pass and the second should fail. When it fails, you'll see an output that looks like this:
+
+```bash
+======================================================================== test session starts =========================================================================
+platform linux -- Python 3.8.1, pytest-5.4.2, py-1.8.1, pluggy-0.13.1 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /backend
+plugins: forked-1.1.3, asyncio-0.12.0, xdist-1.32.0
+collected 2 items
+
+tests/test_cleanings.py::TestCleaningsRoutes::test_routes_exist PASSED                                                                                           [ 50%]
+tests/test_cleanings.py::TestCleaningsRoutes::test_invalid_input_raises_validation_errors FAILED                                                                 [100%]
+
+============================================================================== FAILURES ==============================================================================
+___________________________________________________ TestCleaningsRoutes.test_invalid_input_raises_validation_errors ___________________________________________________
+
+self = <tests.test_cleanings.TestCleaningsRoutes object at 0x7f2d8ebc7250>, app = <fastapi.applications.FastAPI object at 0x7f2d8eb50b80>
+client = <httpx._client.AsyncClient object at 0x7f2d8e61d880>
+
+    @pytest.mark.asyncio
+    async def test_invalid_input_raises_validation_errors(self, app: FastAPI, client: AsyncClient) -> None:
+        # Pass an invalid payload
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+>       assert res.status_code != HTTP_422_UNPROCESSABLE_ENTITY
+E       assert 422 != 422
+E        +  where 422 = <Response [422 Unprocessable Entity]>.status_code
+
+tests/test_cleanings.py:23: AssertionError
+```
+
+What a nice error! It tells us exactly where the error is and why it failed. The assertion expected the response to NOT have a status code of 422, but it did. Fix the test by setting `!=` to `==` and you should have the following.
+
+```python:title=<span>test_cleanings.py</span>
+import pytest
+
+from httpx import AsyncClient
+from fastapi import FastAPI
+
+from starlette.status import HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY
+
+
+class TestCleaningsRoutes:
+    # highlight-start
+    # highlight-end
+    @pytest.mark.asyncio
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code != HTTP_404_NOT_FOUND
+
+    # highlight-start
+    # highlight-end
+    @pytest.mark.asyncio
+    async def test_invalid_input_raises_error(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code == HTTP_422_UNPROCESSABLE_ENTITY  # highlight-line
+
+```
+
+Run the tests again and watch them pass.
+
+Now that we have a testing framework wired up, it's off to the TDD races. Let's write a bit more code for our existing POST route, and then we'll develop tests for a GET endpoint that grabs a cleaning by its id.
+
+## Validating Our Post Route
+
+Since we already have a working POST route, our tests won't follow the traditional TDD structure. We'll instead write tests to validate behavior of code that we've already implemented. The problem with doing it this way is that there's no guarantee that our tests aren't just passing arbitrarily - but for now it'll be alright.
+
+First, start by importing the `CleaningCreate` model and adding another starlette status code. We'll also go ahead and define a new fixture for a new cleaning, and use it in the new testing class we'll create. In addition, we'll remove the `@pytest.mark.asyncio` decorators from each test and add `pytestmark = pytest.mark.asyncio` to have pytest decorate each function for us.
+
+Let's add the highlighted lines to our `test_cleanings.py` file.
+
+```python:title=<span>test_cleanings.py</span>
+import pytest
+
+from httpx import AsyncClient
+from fastapi import FastAPI
+
+# highlight-start
+from starlette.status import HTTP_201_CREATED, HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY
+# highlight-end
+
+from app.models.cleaning import CleaningCreate  # highlight-line
+
+# decorate all tests with @pytest.mark.asyncio
+pytestmark = pytest.mark.asyncio  # highlight-line
+
+
+# highlight-start
+@pytest.fixture
+def new_cleaning():
+    return CleaningCreate(
+        name="test cleaning",
+        description="test description",
+        price=0.00,
+        cleaning_type="spot_clean",
+    )
+# highlight-end
+
+class TestCleaningsRoutes:
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code != HTTP_404_NOT_FOUND
+
+    async def test_invalid_input_raises_error(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.post(app.url_path_for("cleanings:create-cleaning"), json={})
+        assert res.status_code == HTTP_422_UNPROCESSABLE_ENTITY
+
+
+# highlight-start
+class TestCreateCleaning:
+    async def test_valid_input_creates_cleaning(
+        self, app: FastAPI, client: AsyncClient, new_cleaning: CleaningCreate
+    ) -> None:
+        res = await client.post(
+            app.url_path_for("cleanings:create-cleaning"), json={"new_cleaning": new_cleaning.dict()}
+        )
+        assert res.status_code == HTTP_201_CREATED
+
+        created_cleaning = CleaningCreate(**res.json())
+        assert created_cleaning == new_cleaning
+# highlight-end
+
+```
+
+Here we're sending a POST request to our application and ensuring that the response coming from our database has the same shape and data as our input.
+
+What's cool about this test is that it's actually executing queries against a real postgres database! No mocking needed.
+
+If we run `pytest -v` again, we should see three passing tests. How do we know that our code is making this test pass? Well, we don't. That's why we should always write our tests first, watch them fail, and then write just enough code to make the tests pass. That's TDD in a nutshell.
+
+Before we do that, however, we should add a more robust test to check for for invalid inputs.
+
+Add one more test to our `TestCreateCleaning` class.
+
+```python:title=<span>test_cleanings.py</span>
+# ...other code
+
+class TestCreateCleaning:
+    async def test_valid_input_creates_cleaning(
+        self, app: FastAPI, client: AsyncClient, new_cleaning: CleaningCreate
+    ) -> None:
+        res = await client.post(
+            app.url_path_for("cleanings:create-cleaning"), json={"new_cleaning": new_cleaning.dict()}
+        )
+        assert res.status_code == HTTP_201_CREATED
+
+        created_cleaning = CleaningCreate(**res.json())
+        assert created_cleaning == new_cleaning
+
+    # highlight-start
+    # highlight-end
+    @pytest.mark.parametrize(
+        "invalid_payload, status_code",
+        (
+            (None, 422),
+            ({}, 422),
+            ({"name": "test_name"}, 422),
+            ({"price": 10.00}, 422),
+            ({"name": "test_name", "description": "test"}, 422),
+        ),
+    )
+    async def test_invalid_input_raises_error(
+        self, app: FastAPI, client: AsyncClient, invalid_payload: dict, status_code: int
+    ) -> None:
+        res = await client.post(
+            app.url_path_for("cleanings:create-cleaning"), json={"new_cleaning": invalid_payload}
+        )
+        assert res.status_code == status_code
+
+```
+
+This test takes advantage of another very useful pytest feature. As stated in the [docs](https://docs.pytest.org/en/latest/parametrize.html), the builtin `pytest.mark.parametrize` decorator enables parametrization of arguments for a test function. Essentially, we're able to pass in as many different versions of `invalid_payload` and `status_code` as we want, and pytest will generate a test for each set.
+
+Running our tests again, we should now see 8 items passing. Not bad! Let's move on to a new route.
+
+## Creating Endpoints the TDD Way
+
+So we've finally gotten to the TDD part of this post. We have enough tools at our disposal that most of this should look familiar. Remember, we're going to follow a 3 step process:
+
+1. Write a test and make it fail
+2. Write just enough code to make it pass
+3. Rinse, repeat, and refactor until satisfied
+
+Let's put together a GET route the TDD way. We're currently able to insert cleanings into the database, so we'll probably want to be able to fetch a single cleaning by its id. Confident readers should feel free to try this part out on their own before moving on to the next part. All others should carry on.
+
+We'll need to bring in a couple imports, and then add an additional test class to our `test_cleanings.py` file.
+
+```python:title=<span>test_cleanings.py</span>
+# ...other code
+
+# highlight-start
+from starlette.status import (
+    HTTP_200_OK, HTTP_201_CREATED, HTTP_404_NOT_FOUND, HTTP_422_UNPROCESSABLE_ENTITY
+)
+# highlight-end
+
+from app.models.cleaning import CleaningCreate, CleaningInDB  # highlight-line
+
+# ...other code
+
+
+class TestGetCleaning:
+    async def test_get_cleaning_by_id(self, app: FastAPI, client: AsyncClient) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-cleaning-by-id", id=1))
+        assert res.status_code == HTTP_200_OK
+        cleaning = CleaningInDB(**res.json())
+        assert cleaning.id == 1
+
+```
+
+Be careful to note that the `id` keyword argument is passed to the `app.url_path_for` function and not to the `client.get` function.
+
+If we run our tests, we'll see 8 tests passing and 1 test failing with a `starlette.routing.NoMatchFound` error. There's a good reason for that too - we haven't created the route yet. Let's open up our `routes/cleanings.py` file and do that now.
+
+```python:title=<span>routes/cleanings.py</span>
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from starlette.status import HTTP_201_CREATED, HTTP_404_NOT_FOUND
+
+# ...other code
+
+# highlight-start
+# highlight-end
+@router.get("/{id}/", response_model=CleaningPublic, name="cleanings:get-cleaning-by-id")
+async def get_cleaning_by_id(
+  id: int, cleanings_repo: CleaningsRepository = Depends(get_repository(CleaningsRepository))
+) -> CleaningPublic:
+    cleaning = await cleanings_repo.get_cleaning_by_id(id=id)
+
+    if not cleaning:
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="No cleaning found with that id.")
+
+    return cleaning
+
+```
+
+Here we're creating a get route and adding the id as a [path parameter](https://fastapi.tiangolo.com/tutorial/path-params/) to the route. FastAPI will make that value available to our route function as the variable `id`.
+
+We start the route by calling `get_cleaning_by_id` function and pass in the id of the cleaning we're hoping to fetch. If we don't get a cleaning returned by that function, we raise a 404 exception.
+
+Running our tests one more time, we expect to see a new error message, and we do: `AttributeError: 'CleaningsRepository' object has no attribute 'get_cleaning_by_id'`. We haven't written it yet, so that also makes sense. Head into `db/repositories/cleanings.py` and update it like so:
+
+```python:title=<span>db/repositories/cleanings.py</span>
+from app.db.repositories.base import BaseRepository
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningInDB
+
+
+CREATE_CLEANING_QUERY = """
+    INSERT INTO cleanings (name, description, price, cleaning_type)
+    VALUES (:name, :description, :price, :cleaning_type)
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+GET_CLEANING_BY_ID_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings
+    WHERE id = :id;
+"""
+
+
+class CleaningsRepository(BaseRepository):
+    """"
+    All database actions associated with the Cleaning resource
+    """
+    async def create_cleaning(self, *, new_cleaning: CleaningCreate) -> CleaningInDB:
+        query_values = new_cleaning.dict()
+        cleaning = await self.db.fetch_one(query=CREATE_CLEANING_QUERY, values=query_values)
+
+        return CleaningInDB(**cleaning)
+
+    async def get_cleaning_by_id(self, *, id: int) -> CleaningInDB:
+        cleaning = await self.db.fetch_one(query=GET_CLEANING_BY_ID_QUERY, values={"id": id})
+
+        if not cleaning:
+            return None
+
+        return CleaningInDB(**cleaning)
+
+```
+
+Now we've updated our `CleaningsRepository` with a function that executes the `GET_CLEANINGS_BY_ID_QUERY`, and searches in our cleanings table for an entry with a given id. If we find one, we return it. Otherwise we return `None` and our route will throw a 404 error.
+
+Run those tests one more time and everything should pass. Why? Because our database persists for the duration of the testing session. So when we created a cleaning in our previous test, it is available here with an `id` of 1. That can be confusing, and it's usually not a good idea to hard code in ids like we did in our `test_get_cleaning_by_id` function.
+
+A more reliable approach would be to create a `test_cleaning` fixture and use that throughout our tests. Head into the `conftest.py` file and create that fixture like so:
+
+```python:title=<span>conftest.py</span>
+# ...other code
+
+from app.models.cleaning import CleaningCreate, CleaningInDB
+from app.db.repositories.cleanings import CleaningsRepository
+
+# ...other code
+
+@pytest.fixture
+async def test_cleaning(db: Database) -> CleaningInDB:
+    cleaning_repo = CleaningsRepository(db)
+    new_cleaning = CleaningCreate(
+        name="fake cleaning name",
+        description="fake cleaning description",
+        price=9.99,
+        cleaning_type="spot_clean",
+    )
+
+    return await cleaning_repo.create_cleaning(new_cleaning=new_cleaning)
+
+```
+
+With that fixture in place, let's refactor our test.
+
+```python:title=<span>test_cleanings.py</span>
+# ...other code
+
+from app.models.cleaning import CleaningCreate, CleaningInDB
+
+# ...other code
+
+class TestGetCleaning:
+    async def test_get_cleaning_by_id(self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-cleaning-by-id", id=test_cleaning.id))
+        assert res.status_code == HTTP_200_OK
+        cleaning = CleaningInDB(**res.json())
+        assert cleaning == test_cleaning
+
+```
+
+Run those tests again and everything should pass, meaning our fixture is working nicely and we don't need to hardcode in any values. We'll need to refactor it later on, but for now it should do. Let's also add another test for invalid id entries.
+
+```python:title=<span>test_cleanings.py</span>
+# ...other code
+
+class TestGetCleaning:
+    async def test_get_cleaning_by_id(self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-cleaning-by-id", id=test_cleaning.id))
+        assert res.status_code == HTTP_200_OK
+        cleaning = CleaningInDB(**res.json())
+        assert cleaning == test_cleaning
+
+    # highlight-start
+    # highlight-end
+    @pytest.mark.parametrize(
+        "id, status_code",
+        (
+            (500, 404),
+            (-1, 404),
+            (None, 422),
+        ),
+    )
+    async def test_wrong_id_returns_error(
+        self, app: FastAPI, client: AsyncClient, id: int, status_code: int
+    ) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-cleaning-by-id", id=id))
+        assert res.status_code == status_code
+
+```
+
+We're parametrizing the test and passing in multiple invalid ids. Each one is coupled with the status code we expect to see when we send that id to our GET route. Run those tests, make sure everything passes, and then call it a day.
+
+## Wrapping Up and Resources
+
+This post ran a little long, and there's definitely improvements that could be made to our work. For now though, this'll do. With our testing framework in place, we can now reflect on what we've accomplished:
+
+- We've configured `pytest` in our `conftest.py` file
+- Pytest now spins up a new Docker container for each testing session complete with a fresh postgres database
+- Tests queries are executed against the db and persist for the duration of the testing session
+- We've implemented a GET request that returns a cleaning based on its id and crafted it using a test-driven development methodology
+
+At this point, we're finished with most of the setup and can focus on actually developing features for our application from here on out. Readers who want to learn more can refer to this set of resources that were used to design this architecture:
+
+- Github [repo](https://github.com/nsidnev/fastapi-realworld-example-app) for FastAPI implementation of gothinkster - where most of the testing architecture originates from
+- FastAPI Template Generation [repo](https://github.com/tiangolo/full-stack-fastapi-postgresql)
+- FastAPI Users [repo](https://github.com/frankie567/fastapi-users)
+- `pytest` [docs](https://docs.pytest.org/en/latest/)
+- `pytest-asyncio` [repo](https://github.com/pytest-dev/pytest-asyncio)
+- `pytest-xdist` [repo](https://github.com/pytest-dev/pytest-xdist)
+- `httpx` [docs](https://www.python-httpx.org/)
+- `asgi-lifespan` [repo](https://github.com/florimondmanca/asgi-lifespan)
+- `docker` [package](https://docker-py.readthedocs.io/en/stable/)
+- Stackoverflow [answer](https://www.stackoverflow/questions/6506578/how-to-create-a-new-database-using-sqlalchemy) on creating new postgres databases with sqlalchemy
+
+## Github Repo
+
+All code up to this point can be found here:
+
+- https://github.com/Jastor11/phresh-tutorial/tree/tutorial-part-4-testing-fastapi-endpoints-with-docker-and-pytest
+
+> Special thanks to <a href="https://sites.google.com/view/camerontullysmith/cameron-tully-smith" rel="noreferrer noopener" target="_blank">Cameron Tully-Smith</a>, <a href="https://www.linkedin.com/in/artur-kosorz-5a7711130/" target="_blank" rel="noreferrer noopener">Artur Kosorz</a>, and S0h3k for correcting errors in the original code.

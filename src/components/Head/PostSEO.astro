@@ -1,0 +1,206 @@
+---
+import type { BlogPostWithMeta, IPostData } from "@/types/posts"
+
+import * as links from "@/lib/links"
+
+import { config } from "@/core/config"
+
+import TwitterTags from "./SEO/TwitterTags.astro"
+import OpenGraphBasicTags from "./SEO/OpenGraphBasicTags.astro"
+import OpenGraphArticleTags from "./SEO/OpenGraphArticleTags.astro"
+import OpenGraphImageTags from "./SEO/OpenGraphImageTags.astro"
+import OpenGraphOptionalTags from "./SEO/OpenGraphOptionalTags.astro"
+
+type Props = {
+  post: BlogPostWithMeta
+  globbedPost: Record<string, any> | undefined
+}
+
+const props = Astro.props
+
+const { post, globbedPost } = props as Props
+
+const {
+  site_url,
+  // sub_title,
+  site_title,
+  info,
+  // site_logo,
+  site_description,
+} = config
+
+// const siteUrl = Astro.site ?? site_url
+const canonicalURL = new URL(Astro.url.pathname, Astro.site)
+
+const relativePostUrl = links.formatBlogLinkFromSlug(post.slug)
+const postUrl = new URL(relativePostUrl, Astro.site)
+
+const postData = post.data as IPostData
+
+// const isHighSchoolPost = postData.isHighSchoolLesson ?? false
+
+const twitter = info.contacts.twitter
+const authorName = info.name
+const postTitle = post.data.title
+
+// @ts-ignore
+const postExcerpt = post?.excerpt as string | undefined
+
+const postDescription = postData.description ?? postExcerpt ?? null
+// const description = postDescription ?? site_description // "A new post by Jeff Astor."
+const description = site_description // "A new post by Jeff Astor."
+const tags = postData.tags ?? []
+// turn tags into string like this:
+// ;("tag1, tag2, tag3")
+const stringifiedTags = tags.join(", ")
+const postCategory = postData.category ?? undefined
+const publishDate = postData.date
+const updatedDate = postData.dateModified ?? null
+
+// const metaTitle = appendToMetaTitle(postTitle)
+// const metaDescription = metaDescriptionOrDefault(description)
+
+const image = "/images/astor_teaching_512_x_512.jpg"
+const logo = "/images/JeffAstor_Logo_512x512_rounded.png"
+
+// const imageUrl = new URL(image, Astro.url)
+const imageUrl = new URL(image, Astro.site)
+const logoUrl = new URL(logo, Astro.url)
+
+// const schemaOrgJSONLD = []
+// website schema item
+const websiteSchemaItem = {
+  "@context": "http://schema.org",
+  "@type": "WebSite",
+  name: site_title,
+  url: site_url,
+  logo: logoUrl.toString(),
+  image: imageUrl.toString(),
+  // alternateName: sub_title,
+} as const
+
+// breadcrumb list
+const breadCrumbSchemaItem = {
+  "@context": "http://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      item: {
+        "@id": postUrl,
+        name: site_title,
+        image: imageUrl.toString(),
+      },
+    },
+  ],
+} as const
+const blogPostSchemaItem = {
+  "@context": "http://schema.org",
+  "@type": "BlogPosting",
+  // "@type": "TechArticle",
+  url: site_url,
+  name: postTitle,
+  alternateName: site_title,
+  headline: postTitle,
+  mainEntityOfPage: {
+    "@type": "WebSite",
+    "@id": site_url,
+  },
+  // proficiencyLevel: isHighSchoolPost ? "Beginner" : "Expert",
+  image: {
+    "@type": "ImageObject",
+    "@id": imageUrl.toString(),
+    url: imageUrl.toString(),
+    height: "512",
+    width: "512",
+  },
+  author: {
+    "@type": "Person",
+    name: authorName,
+    url: site_url,
+    image: {
+      "@type": "ImageObject",
+      "@id": imageUrl.toString(),
+      url: imageUrl.toString(),
+      height: "512",
+      width: "512",
+    },
+  },
+  description,
+  keywords: tags,
+  /* the schema expects Date or DateTime using ISO 8601 format. For Date that is yyyy-MM-dd */
+  datePublished: publishDate.toISOString().substring(0, 10),
+  /* updateDate is optional frontmatter, so we conditionally add dateModified if it exists */
+  ...(updatedDate ? { dateModified: updatedDate.toISOString().substring(0, 10) } : {}),
+} as const
+
+const schemaOrgJSONLD = [websiteSchemaItem, breadCrumbSchemaItem, blogPostSchemaItem] as const
+
+const stringifiedSchema = JSON.stringify(schemaOrgJSONLD, null, 2)
+
+const twitterInfo = {
+  card: "summary_large_image" as const,
+  creator: twitter,
+  title: postTitle,
+  // description,
+  description: postDescription ?? description,
+  image: imageUrl.toString(),
+  // site: siteUrl.toString(),
+  section: postCategory,
+} as const
+
+const openGraphInfo = {
+  article: {
+    section: postCategory,
+    datePublished: publishDate.toISOString().substring(0, 10),
+    ...(updatedDate ? { dateModified: updatedDate.toISOString().substring(0, 10) } : {}),
+    authors: [authorName],
+    tags,
+  },
+  basic: {
+    title: postTitle,
+    type: "article" as const,
+    // url: postUrl.toString(),
+    url: canonicalURL,
+    image: imageUrl.toString(),
+  },
+  image: {
+    // image: "",
+    height: 512,
+    width: 512,
+    alt: "Teaching former students",
+    type: "image/jpeg",
+  },
+  optional: {
+    description: postDescription,
+    siteName: site_title,
+  },
+} as const
+
+const openGraphArticle = { ...openGraphInfo.article, authors: [...openGraphInfo.article.authors] }
+const openGraphOptional = { ...openGraphInfo.optional, description: openGraphInfo.optional.description ?? undefined }
+
+/**
+ * NOTE: Commento has been discontinued
+ *
+ * Disabling comments until a decision has been made on what to migrate to
+ */
+---
+
+<meta name="image" content={imageUrl.toString()} />
+<meta name="keywords" content={stringifiedTags} />
+
+<script type="application/ld+json" set:html={stringifiedSchema} />
+
+<!-- Open Graph / Facebook -->
+<OpenGraphBasicTags basic={openGraphInfo.basic} />
+<OpenGraphOptionalTags optional={openGraphOptional} />
+<OpenGraphImageTags image={openGraphInfo.image} basic={openGraphInfo.basic} />
+<OpenGraphArticleTags article={openGraphArticle} />
+
+<!-- Twitter -->
+<TwitterTags twitter={twitterInfo} />
+
+<!-- Comments - NOTE: Commento has been discontinued.  -->
+<!-- <script defer src="https://cdn.commento.io/js/commento.js"></script> -->

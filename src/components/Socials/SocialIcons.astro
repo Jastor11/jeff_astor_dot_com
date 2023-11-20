@@ -1,0 +1,38 @@
+---
+import ContactIcon from "./ContactIcon.astro"
+import type { SocialIconSize } from "@/lib/socials"
+import { getSocials } from "@/lib/socials"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  size?: SocialIconSize
+  className?: string
+}
+
+const props: Props = Astro.props
+
+const size = props.size ?? "sm"
+
+const socials = getSocials(size)
+
+const wrapperClassnames = cn([
+  //
+  "my-2",
+  "-translate-x-3 lg:-translate-x-0",
+  props.className,
+])
+---
+
+<div class={wrapperClassnames}>
+  {
+    socials.map((social) => (
+      <ContactIcon
+        icon={social.icon}
+        path={social.path}
+        size={social.size}
+        variant={social.icon === "email" ? "standard" : "standard"}
+        fillIcon={social.icon === "email"}
+      />
+    ))
+  }
+</div>

@@ -1,0 +1,92 @@
+---
+import ExternalLink from "@/components/Common/ExternalLink.astro"
+import Codepen from "@/components/Icons/Codepen.astro"
+import Envelope from "@/components/Icons/Envelope.astro"
+import Facebook from "@/components/Icons/Facebook.astro"
+import Github from "@/components/Icons/Github.astro"
+import Instagram from "@/components/Icons/Instagram.astro"
+import Linkedin from "@/components/Icons/Linkedin.astro"
+import Twitter from "@/components/Icons/Twitter.astro"
+import YouTube from "@/components/Icons/YouTube.astro"
+
+import { cn } from "@/utils/styles"
+
+const iconMapping = {
+  codepen: Codepen,
+  email: Envelope,
+  facebook: Facebook,
+  github: Github,
+  instagram: Instagram,
+  linkedin: Linkedin,
+  twitter: Twitter,
+  youtube: YouTube,
+} as const
+
+const iconSizeToClassNamesMapping = {
+  sm: {
+    link: "w-3.5 h-3.5 rounded m-1 p-1.5",
+    icon: "max-w-5 max-h-5",
+  },
+  md: {
+    link: "w-5 h-5 rounded-md m-2 p-3",
+    icon: "max-w-6 max-h-6",
+  },
+  lg: {
+    link: "w-6 h-6 rounded-lg m-4 p-4",
+    icon: "max-w-12 max-h-12",
+  },
+} as const
+
+const iconVariantToClassNamesMapping = {
+  standard: {
+    stroke: "stroke-light text-light",
+    fill: "fill-light text-light",
+  },
+  inverted: {
+    stroke: "stroke-dark text-dark",
+    fill: "fill-dark text-dark",
+  },
+} as const
+
+type Props = {
+  icon: keyof typeof iconMapping
+  path: string
+  size?: keyof typeof iconSizeToClassNamesMapping
+  variant?: keyof typeof iconVariantToClassNamesMapping
+  fillIcon?: boolean
+  className?: string
+}
+
+const { icon, path, size, variant, fillIcon, className, ...props } = Astro.props
+
+const sizeStyles = iconSizeToClassNamesMapping[size ?? "sm"]
+const variantStyles = iconVariantToClassNamesMapping[variant ?? "standard"][fillIcon ? "fill" : "stroke"]
+const Icon = iconMapping[icon]
+
+const wrapperClassnames = cn(["flex flex-col items-center justify-center", className])
+const linkClassnames = cn([
+  "flex-center flex items-center justify-center",
+  "text-white",
+  "group duration-200",
+  variantStyles,
+  sizeStyles.link,
+])
+const iconClassnames = cn([
+  sizeStyles.icon,
+  "flex-shrink-0",
+  "will-change-transform",
+  "group-hover:duration-300 group-hover:ease-op-ease-squish-5 group-hover:scale-125",
+])
+---
+
+<div class={wrapperClassnames} {...props}>
+  <ExternalLink
+    href={path}
+    target="_blank"
+    rel="noopener noreferrer"
+    class={linkClassnames}
+    aria-label={`Link to author's socials for: ${icon}`}
+  >
+    <Icon className={iconClassnames} />
+  </ExternalLink>
+</div>

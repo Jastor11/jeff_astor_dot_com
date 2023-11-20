@@ -1,0 +1,25 @@
+---
+import { cn } from "@/utils/styles"
+
+type Props = {
+  className?: string
+  title: string
+}
+
+const { className, title, ...props } = Astro.props
+
+const titleClassnames = cn([
+  "mt-4 mb-12",
+  "font-semibold",
+  "text-3xl xs:text-5xl sm:text-7xl sm:leading-[5.25rem]",
+  "md:text-center",
+  "text-light",
+  "font-display",
+  className,
+  //
+])
+---
+
+<h1 class={titleClassnames}>
+  {title}
+</h1>

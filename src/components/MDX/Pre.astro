@@ -1,0 +1,21 @@
+---
+// import type { HTMLAttributes } from "astro/types"
+import { PrePlaceholder } from "./code/PrePlaceholder"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  className,
+  //
+])
+---
+
+<PrePlaceholder className={elementClassnames} {...props} client:only="react">
+  <slot />
+</PrePlaceholder>

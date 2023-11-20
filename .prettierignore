@@ -1,4 +1,5 @@
-.cache
+dist
+node_modules
+.github
+.changeset
 package.json
-package-lock.json
-public

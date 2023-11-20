@@ -1,0 +1,910 @@
+---
+title: "Resource Management with FastAPI"
+category: "FastAPI"
+date: "05/28/2020"
+dateModified: "01/13/2021"
+published: "true"
+slug: "resource-management-with-fastapi"
+series: up-and-running-with-fastapi
+tags:
+  - python
+  - fastapi
+  - server
+  - postgres
+  - databases
+  - docker
+  - pytest
+  - testing
+---
+
+import CRUDEndpointsTable from "@/components/MDX/custom/CRUDEndpointsTable"
+import FastAPISeriesList from "@/components/MDX/series/FastAPI.astro"
+
+Welcome to Part 5 of Up and Running with FastAPI. If you missed part 4, you can find it [here](/blog/testing-fastapi-endpoints-with-docker-and-pytest).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={5} />
+
+In our last post we configured our testing framework - `pytest` - and modified our db config to spin up a fresh PostgreSQL database for each testing session. We tested a POST route and used TDD to develop a GET route for our cleaning resource. In this post, we'll follow use Test-Driven Development to implement endpoints for other RESTful CRUD actions.
+
+Let's begin.
+
+## RESTful Endpoints
+
+When developing RESTful endpoints, we'll follow the standard protocols. This ensures that our API behaves predictably across our entire application. Here's the general structure for our cleaning resource.
+
+<CRUDEndpointsTable resource="cleaning" />
+
+We've implemented the first two endpoints already - get a cleaning by id and create a cleaning. Moving down the list, our next task is to build a GET endpoint for reading all available cleanings.
+
+As before, we'll start by writing our tests and making sure they fail. Then we'll write whatever code is needed to get our tests passing. Let's make sure our docker container is running by using `docker-compose up`, and open up our `test_cleanings.py` file. Update the `TestGetCleaning` class at the bottom of the file with a new test:
+
+```python:title=<span>test_cleanings.py</span>
+# ...other code
+
+class TestGetCleaning:
+    async def test_get_cleaning_by_id(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        test_cleaning: CleaningInDB,
+    ) -> None:
+        res = await client.get(
+            app.url_path_for(
+                "cleanings:get-cleaning-by-id",
+                id=test_cleaning.id,
+            ),
+        )
+        assert res.status_code == HTTP_200_OK
+        cleaning = CleaningInDB(**res.json())
+        assert cleaning == test_cleaning
+
+    @pytest.mark.parametrize(
+        "id, status_code",
+        (
+            (500, 404),
+            (-1, 404),
+            (None, 422),
+        ),
+    )
+    async def test_wrong_id_returns_error(
+        self, app: FastAPI, client: AsyncClient, id: int, status_code: int
+    ) -> None:
+        res = await client.get(
+            app.url_path_for("cleanings:get-cleaning-by-id", id=id),
+        )
+        assert res.status_code == status_code
+
+    async def test_get_all_cleanings_returns_valid_response(  # highlight-line
+        self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB  # highlight-line
+    ) -> None:  # highlight-line
+        res = await client.get(app.url_path_for("cleanings:get-all-cleanings"))  # highlight-line
+        assert res.status_code == HTTP_200_OK  # highlight-line
+        assert isinstance(res.json(), list)  # highlight-line
+        assert len(res.json()) > 0  # highlight-line
+        cleanings = [CleaningInDB(**l) for l in res.json()]  # highlight-line
+        assert test_cleaning in cleanings  # highlight-line
+
+```
+
+Our new test hits an endpoint with the name `cleanings:get-all-cleanings` and checks that we get a 200 response. We then ensure that our response is a list, assert that the list is not empty, and coerce all returned cleanings into the shape of our `CleaningInDB` model. Finally, we verify that our `test_cleaning` fixture is present in the response.
+
+Remember that we run our tests by executing the command `pytest -v` inside the container hosting our FastAPI server. Get the container id by running `docker ps`, and execute bash commands interactively with `docker exec -it [CONTAINER_ID] bash`.
+
+Run the tests and we should see a familiar `starlette.routing.NoMatchFound` error.
+
+> One thing to note about our current testing setup: because the database persists for the duration of our testing session, each time we use the `test_cleaning` fixture, we're adding an additional record to the database. If we had any columns with unique constraints, our fixture would throw an error. Solving that problem is simple enough. Don't worry about it now, as we'll get to that issue in a later post. For the moment, just be aware that the number of elements returned in a response may vary depending on what tests have been run before it.
+
+Now we implement our GET route starting with our `api/routes/cleanings.py` file and working our way inward to our `CleaningsRepository`. Opening up our cleanings route, we see a mock endpoint that we created in our first post. Let's modify that a bit to get our tests passing
+
+```python:title=<span>api/routes/cleanings.py</span>
+from typing import List
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+from starlette.status import HTTP_201_CREATED, HTTP_404_NOT_FOUND
+
+from app.models.cleaning import CleaningCreate, CleaningPublic
+from app.db.repositories.cleanings import CleaningsRepository
+from app.api.dependencies.database import get_repository
+
+
+router = APIRouter()
+
+
+@router.get("/", response_model=List[CleaningPublic], name="cleanings:get-all-cleanings")   # highlight-line
+async def get_all_cleanings() -> List[CleaningPublic]:  # highlight-line
+    return None  # highlight-line
+
+# ...other code
+
+```
+
+All we've done is give our route a name that `Starlette` will recognize and let `FastAPI` know that we're intending to return a list of `CleaningPublic` models. For the sake of development, we simply return `None`. Running our tests again, pytest throws a new error. Is this what we want?
+
+```bash
+============================================================================== FAILURES ==============================================================================
+____________________________________________________ TestGetCleaning.test_get_all_cleanings_returns_valid_response _____________________________________________________
+self = <tests.test_cleanings.TestGetCleaning object at 0x7f3ed89b2460>, app = <fastapi.applications.FastAPI object at 0x7f3ed895c040>
+client = <httpx._client.AsyncClient object at 0x7f3ed895cbe0>
+
+test_cleaning = CleaningInDB(name='fake cleaning name', description='fake cleanings description', price=9.99, cleaning_type=<CleaningType.spot_clean: 'spot_clean'>, id=3)
+
+    async def test_get_all_cleanings_returns_valid_response(
+        self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB
+    ) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-all-cleanings"))
+        assert res.status_code == HTTP_200_OK
+>       assert isinstance(res.json(), list)
+E       assert False
+E        +  where False = isinstance(None, list)
+E        +    where None = <bound method Response.json of <Response [200 OK]>>()
+E        +      where <bound method Response.json of <Response [200 OK]>> = <Response [200 OK]>.json
+
+tests/test_cleanings.py:94: AssertionError
+```
+
+Once again, pytest is gracious enough to tell us exactly what's happening. Our tests are expecting the response to be a list, and it's actually None.
+
+Fix that before running the tests again.
+
+```python:title=<span>api/routes/cleanings.py</span>
+# ...other code
+
+@router.get("/", response_model=List[CleaningPublic], name="cleanings:get-all-cleanings")
+async def get_all_cleanings() -> List[CleaningPublic]:
+    return [] # highlight-line
+
+# ...other code
+```
+
+Hunker down, because we'll be doing this a lot.
+
+Run those tests one more time!
+
+```bash
+============================================================================== FAILURES ==============================================================================
+____________________________________________________ TestGetCleaning.test_get_all_cleanings_returns_valid_response _____________________________________________________
+self = <tests.test_cleanings.TestGetCleaning object at 0x7f1180e27340>, app = <fastapi.applications.FastAPI object at 0x7f1180c64040>
+client = <httpx._client.AsyncClient object at 0x7f1180c64bb0>
+
+test_cleaning = CleaningInDB(name='fake cleaning name', description='fake cleanings description', price=9.99, cleaning_type=<CleaningType.spot_clean: 'spot_clean'>, id=3)
+
+    async def test_get_all_cleanings_returns_valid_response(
+        self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB
+    ) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-all-cleanings"))
+        assert res.status_code == HTTP_200_OK
+        assert isinstance(res.json(), list)
+>       assert len(res.json()) > 0
+E       assert 0 > 0
+E        +  where 0 = len([])
+E        +    where [] = <bound method Response.json of <Response [200 OK]>>()
+E        +      where <bound method Response.json of <Response [200 OK]>> = <Response [200 OK]>.json
+
+tests/test_cleanings.py:95: AssertionError
+```
+
+We're slowly working our way down the test, writing just enough code to fix the previous problem. We know what's happening here too - our list is supposed to contain at least one item and it's empty.
+
+Fixing that should be easy enough:
+
+```python:title=<span>api/routes/cleanings.py</span>
+# ...other code
+
+@router.get("/", response_model=List[CleaningPublic], name="cleanings:get-all-cleanings")
+async def get_all_cleanings() -> List[CleaningPublic]:
+    return [{ "id": 1, "name": "fake cleaning", "price": 0}] # highlight-line
+
+# ...other code
+```
+
+Now, this is deliberately silly. We know this code isn't doing anything useful, but it will take us to the last assertion we'll need to handle for this test.
+
+Running our tests shows the following error:
+
+```bash
+============================================================================== FAILURES ==============================================================================
+____________________________________________________ TestGetCleaning.test_get_all_cleanings_returns_valid_response _____________________________________________________
+self = <tests.test_cleanings.TestGetCleaning object at 0x7f53bb926ee0>, app = <fastapi.applications.FastAPI object at 0x7f53bb8dd040>
+client = <httpx._client.AsyncClient object at 0x7f53bb8ddbb0>
+
+test_cleaning = CleaningInDB(name='fake cleaning name', description='fake cleanings description', price=9.99, cleaning_type=<CleaningType.spot_clean: 'spot_clean'>, id=3)
+
+    async def test_get_all_cleanings_returns_valid_response(
+        self, app: FastAPI, client: AsyncClient, test_cleaning: CleaningInDB
+    ) -> None:
+        res = await client.get(app.url_path_for("cleanings:get-all-cleanings"))
+        assert res.status_code == HTTP_200_OK
+        assert isinstance(res.json(), list)
+        assert len(res.json()) > 0
+        cleanings = [CleaningInDB(**l) for l in res.json()]
+>       assert test_cleaning in cleanings
+E       AssertionError: assert CleaningInDB(name='fake cleaning name', description='fake cleanings description', price=9.99, cleaning_type=<CleaningType.spot_clean: 'spot_clean'>, id=3)
+        in [CleaningInDB(name='fake_cleaning', description=None, price=0.0, cleaning_type=<CleaningType.spot_clean: 'spot_clean'>, id=1)]
+
+tests/test_cleanings.py:97: AssertionError
+```
+
+Since we're returning a fake response, the cleaning provided by our `test_cleaning` fixture isn't present in the response. We'll need to actually hit our database and update our `db/repositories/cleanings.py` file to get this one passing.
+
+```python:title=<span>api/routes/cleanings.py</span>
+# ...other code
+
+@router.get("/", response_model=List[CleaningPublic], name="cleanings:get-all-cleanings")
+async def get_all_cleanings(
+    cleanings_repo: CleaningsRepository = Depends(get_repository(CleaningsRepository)) # highlight-line
+) -> List[CleaningPublic]:
+    return await cleanings_repo.get_all_cleanings() # highlight-line
+
+# ...other code
+```
+
+We won't bore ourselves with another error message, since we're getting the hang of this now, but we'll run them anyway.
+
+When we do, we see that pytest is politely telling us that our `CleaningsRepository` has no `get_all_cleanings` attribute. That makes sense, since we haven't written the method yet.
+
+Let's do that now.
+
+```python:title=<span>db/repositories/cleanings.py</span> {19-22}
+from typing import List # highlight-line
+
+from app.db.repositories.base import BaseRepository
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningInDB
+
+
+CREATE_CLEANING_QUERY = """
+    INSERT INTO cleanings (name, description, price, cleaning_type)
+    VALUES (:name, :description, :price, :cleaning_type)
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+GET_CLEANING_BY_ID_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings
+    WHERE id = :id;
+"""
+
+GET_ALL_CLEANINGS_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings;
+"""
+
+
+class CleaningsRepository(BaseRepository):
+    """"
+    All database actions associated with the Cleaning resource
+    """
+    async def create_cleaning(self, *, new_cleaning: CleaningCreate) -> CleaningInDB:
+        query_values = new_cleaning.dict()
+        cleaning = await self.db.fetch_one(
+            query=CREATE_CLEANING_QUERY,
+            values=query_values,
+        )
+
+        return CleaningInDB(**cleaning)
+
+    async def get_cleaning_by_id(self, *, id: int) -> CleaningInDB:
+        cleaning = await self.db.fetch_one(
+            query=GET_CLEANING_BY_ID_QUERY,
+            values={"id": id},
+        )
+
+        if not cleaning:
+            return None
+
+        return CleaningInDB(**cleaning)
+
+    async def get_all_cleanings(self) -> List[CleaningInDB]:  # highlight-line
+        cleaning_records = await self.db.fetch_all(  # highlight-line
+            query=GET_ALL_CLEANINGS_QUERY,  # highlight-line
+        )  # highlight-line
+  # highlight-line
+        return [CleaningInDB(**l) for l in cleaning_records]  # highlight-line
+
+```
+
+Not too much going on here. We've added a SQL query that grabs all cleaning records in our database, and we've written our `get_all_cleanings` method that executes our new query before returning a list of `CleaningInDB` models for each record found.
+
+And look at that! Running our tests again gives us 13 greens - all passing.
+
+Don't be discouraged if that process felt tedious. We took it slow and stepped through each action deliberately. For the next two routes, we'll breeze through the basics and spend most of our time in the code.
+
+## PUT Route
+
+The next thing we'll do is provide a route for updating a cleaning.
+
+Head back to the `test_cleanings.py` file and add the following code:
+
+```python:title=<span>test_cleanings.py</span>
+from typing import List, Union
+
+# ...other code
+
+
+class TestUpdateCleaning:
+    @pytest.mark.parametrize(
+        "attrs_to_change, values",
+        (
+            (["name"], ["new fake cleaning name"]),
+            (["description"], ["new fake cleaning description"]),
+            (["price"], [3.14]),
+            (["cleaning_type"], ["full_clean"]),
+            (
+                ["name", "description"],
+                [
+                    "extra new fake cleaning name",
+                    "extra new fake cleaning description",
+                ],
+            ),
+            (["price", "cleaning_type"], [42.00, "dust_up"]),
+        ),
+    )
+    async def test_update_cleaning_with_valid_input(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        test_cleaning: CleaningInDB,
+        attrs_to_change: List[str],
+        values: List[str],
+    ) -> None:
+        cleaning_update = {
+            "cleaning_update": {
+                attrs_to_change[i]: values[i] for i in range(len(attrs_to_change))
+            }
+        }
+
+        res = await client.put(
+            app.url_path_for(
+                "cleanings:update-cleaning-by-id",
+                id=test_cleaning.id,
+            ),
+            json=cleaning_update
+        )
+        assert res.status_code == HTTP_200_OK
+        updated_cleaning = CleaningInDB(**res.json())
+        assert updated_cleaning.id == test_cleaning.id  # make sure it's the same cleaning
+        # make sure that any attribute we updated has changed to the correct value
+        for i in range(len(attrs_to_change)):
+            attr_to_change = getattr(updated_cleaning, attrs_to_change[i])
+            assert attr_to_change != getattr(test_cleaning, attrs_to_change[i])
+            assert attr_to_change == values[i]
+        # make sure that no other attributes' values have changed
+        for attr, value in updated_cleaning.dict().items():
+            if attr not in attrs_to_change:
+                assert getattr(test_cleaning, attr) == value
+
+    @pytest.mark.parametrize(
+        "id, payload, status_code",
+        (
+            (-1, {"name": "test"}, 422),
+            (0, {"name": "test2"}, 422),
+            (500, {"name": "test3"}, 404),
+            (1, None, 422),
+            (1, {"cleaning_type": "invalid cleaning type"}, 422),
+            (1, {"cleaning_type": None}, 400),
+        ),
+    )
+    async def test_update_cleaning_with_invalid_input_throws_error(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        id: int,
+        payload: dict,
+        status_code: int,
+    ) -> None:
+        cleaning_update = {"cleaning_update": payload}
+
+        res = await client.put(
+            app.url_path_for("cleanings:update-cleaning-by-id", id=id),
+            json=cleaning_update
+        )
+        assert res.status_code == status_code
+
+```
+
+Our first new test is parametrized once for each attribute on our cleaning resource, and a few combinations of them. We'll attempt to update each one of them and make sure that our route returns an updated version of the original entry.
+
+The second test ensures that a number of different invalid payloads and id combinations return the `>= 400` status code we expect.
+
+We run our tests again and see that we now have 12 tests failing. They're all failing for the same reason - `Starlette` can't find the PUT route. And we know how to handle that.
+
+We won't bother with stepping through each line. Instead we'll get straight into the implementation.
+
+Update the `api/routes/cleanings.py` file with two new imports and a PUT route.
+
+```python:title=<span>api/routes/cleanings.py</span>
+# ...other code
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Path
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningPublic
+
+# ...other code
+
+
+@router.put(
+    "/{id}/",
+    response_model=CleaningPublic,
+    name="cleanings:update-cleaning-by-id",
+)
+async def update_cleaning_by_id(
+    id: int = Path(..., ge=1, title="The ID of the cleaning to update."),
+    cleaning_update: CleaningUpdate = Body(..., embed=True),
+    cleanings_repo: CleaningsRepository = Depends(get_repository(CleaningsRepository)),
+) -> CleaningPublic:
+    updated_cleaning = await cleanings_repo.update_cleaning(
+        id=id, cleaning_update=cleaning_update,
+    )
+
+    if not updated_cleaning:
+        raise HTTPException(
+            status_code=HTTP_404_NOT_FOUND,
+            detail="No cleaning found with that id.",
+        )
+
+    return updated_cleaning
+
+```
+
+A few new things going here. Our route accepts an `id` [path parameter](https://fastapi.tiangolo.com/tutorial/path-params-numeric-validations/) that takes advantage of `Path` - which we just imported from FastAPI - for additional validation. With `ge=1`, we're telling FastAPI that the cleaning id must be an integer greater than or equal to `1`. If it's not, FastAPI will return an `HTTP_422_UNPROCESSABLE_ENTITY` exception for us. We can do similar things for strings, along with a number of other fancy validations that we'll get to in a later post.
+
+We pass the id of the specified cleaning and any updates we're applying to that cleaning to our `CleaningsRepository` and call the `update_cleaning` method on it. If the method does not return a valid cleaning, we raise a 404 exception, indicating that the id did not correspond to any cleaning resource in our database.
+
+Let's go ahead and write the `update_cleaning` method now.
+
+```python:title=<span>db/repositories/cleanings.py</span>
+from typing import List
+
+from fastapi import HTTPException
+from starlette.status import HTTP_400_BAD_REQUEST
+
+from app.db.repositories.base import BaseRepository
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningInDB
+
+
+CREATE_CLEANING_QUERY = """
+    INSERT INTO cleanings (name, description, price, cleaning_type)
+    VALUES (:name, :description, :price, :cleaning_type)
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+GET_CLEANING_BY_ID_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings
+    WHERE id = :id;
+"""
+
+GET_ALL_CLEANINGS_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings;
+"""
+
+UPDATE_CLEANING_BY_ID_QUERY = """
+    UPDATE cleanings  
+    SET name         = :name,  
+        description  = :description,  
+        price        = :price,  
+        cleaning_type = :cleaning_type  
+    WHERE id = :id  
+    RETURNING id, name, description, price, cleaning_type;  
+"""
+
+
+class CleaningsRepository(BaseRepository):
+    """"
+    All database actions associated with the Cleaning resource
+    """
+    async def create_cleaning(self, *, new_cleaning: CleaningCreate) -> CleaningInDB:
+        query_values = new_cleaning.dict()
+        cleaning = await self.db.fetch_one(
+            query=CREATE_CLEANING_QUERY,
+            values=query_values,
+        )
+
+        return CleaningInDB(**cleaning)
+
+    async def get_cleaning_by_id(self, *, id: int) -> CleaningInDB:
+        cleaning = await self.db.fetch_one(
+            query=GET_CLEANING_BY_ID_QUERY,
+            values={"id": id},
+        )
+
+        if not cleaning:
+            return None
+
+        return CleaningInDB(**cleaning)
+
+    async def get_all_cleanings(self) -> List[CleaningInDB]:
+        cleaning_records = await self.db.fetch_all(
+            query=GET_ALL_CLEANINGS_QUERY,
+        )
+
+        return [CleaningInDB(**l) for l in cleaning_records]
+
+    async def update_cleaning(  # highlight-line
+        self, *, id: int, cleaning_update: CleaningUpdate,  # highlight-line
+    ) -> CleaningInDB:  # highlight-line
+        cleaning = await self.get_cleaning_by_id(id=id)  # highlight-line
+  # highlight-line
+        if not cleaning:  # highlight-line
+            return None  # highlight-line
+  # highlight-line
+        cleaning_update_params = cleaning.copy(  # highlight-line
+            update=cleaning_update.dict(exclude_unset=True),  # highlight-line
+        )  # highlight-line
+  # highlight-line
+        try:  # highlight-line
+            updated_cleaning = await self.db.fetch_one(  # highlight-line
+                query=UPDATE_CLEANING_BY_ID_QUERY,  # highlight-line
+                values=cleaning_update_params.dict(),  # highlight-line
+            )  # highlight-line
+            return CleaningInDB(**updated_cleaning)  # highlight-line
+        except Exception as e:  # highlight-line
+            print(e)  # highlight-line
+            raise HTTPException(  # highlight-line
+                status_code=HTTP_400_BAD_REQUEST,  # highlight-line
+                detail="Invalid update params.",  # highlight-line
+            )  # highlight-line
+
+```
+
+Our `update_cleaning` method has a few interesting things going on here. We start by calling the `get_cleaning_by_id` method that we defined in our previous post. If that method doesn't find a cleaning with the id we passed it, we return `None` and let our route raise a 404 exception.Because it returns a `CleaningInDB` pydantic model, we can convert and export our model in a few useful ways.
+
+As specified in pydantic [docs](https://pydantic-docs.helpmanual.io/usage/exporting_models/), we can call the `.copy()` method on the model and pass any changes we'd like to make to the `update` parameter. Pydantic indicates that `update` should be "a dictionary of values to change when creating the copied model", and we obtain that by calling the `.dict()` method on the `CleaningUpdate` model we received in our PUT route. By specifying `exclude_unset=True`, Pydantic will leave out any attributes that were not explicitly set when the model was created.
+
+An example makes this clearer.
+
+```python
+cleaning_update = CleaningUpdate(name="clean my room", price=1000.00)
+cleaning_update.dict()
+>>> {"name": "clean my room", "description": None, "price": 1000.00, "cleaning_type": None}
+cleaning_update.dict(exclude_unset=True)
+>>> {"name": "clean my room", "price": 1000.00}
+```
+
+The updated copy will therefore be modified using only the attributes specified in the PUT request. We'll take advantage of this convenient syntax all over our application. We then pass our new params to the `UPDATE_CLEANING_BY_ID_QUERY` and ensure that if anything goes wrong we return a 400 error.
+
+If all is well, we return the updated cleaning and celebrate our victory. When we run our tests, we see that everything is passing! However, looking in our terminal running our FastAPI server should show us something interesting.
+
+All the tests pass, but a `null value in column 'cleaning_type' violates not-null constraint` error is thrown and printed to the terminal. Good thing we made sure to catch all exceptions when updating our cleaning record.
+
+So why is this happening?
+
+Note that because we listed "cleaning_type" with an `Optional` type specification in our `CleaningUpdate` model, `None` is an allowed value. In our `test_update_cleaning_with_invalid_input_throws_error` test, one of our parametrized payloads includes `"cleaning_type": None`. It's a good idea to test any invalid input permutation we can think of to catch errors like this.
+
+There are other more elegant ways to handle this problem other than a try-catch, but we'll leave that as an exercise for the reader. Let's simply handle this edge case by raising an error if the `cleaning_type` is `None`.
+
+```python:title=<span>db/repositories/cleanings.py</span>
+from typing import List
+
+from fastapi import HTTPException
+from starlette.status import HTTP_400_BAD_REQUEST
+
+from app.db.repositories.base import BaseRepository
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningInDB
+
+
+CREATE_CLEANING_QUERY = """
+    INSERT INTO cleanings (name, description, price, cleaning_type)
+    VALUES (:name, :description, :price, :cleaning_type)
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+GET_CLEANING_BY_ID_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings
+    WHERE id = :id;
+"""
+
+GET_ALL_CLEANINGS_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings;
+"""
+
+UPDATE_CLEANING_BY_ID_QUERY = """
+    UPDATE cleanings
+    SET name          = :name,
+        description   = :description,
+        price         = :price,
+        cleaning_type = :cleaning_type
+    WHERE id = :id
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+
+class CleaningsRepository(BaseRepository):
+    """"
+    All database actions associated with the Cleaning resource
+    """
+    async def create_cleaning(self, *, new_cleaning: CleaningCreate) -> CleaningInDB:
+        query_values = new_cleaning.dict()
+        cleaning = await self.db.fetch_one(
+            query=CREATE_CLEANING_QUERY,
+            values=query_values,
+        )
+
+        return CleaningInDB(**cleaning)
+
+    async def get_cleaning_by_id(self, *, id: int) -> CleaningInDB:
+        cleaning = await self.db.fetch_one(
+            query=GET_CLEANING_BY_ID_QUERY,
+            values={"id": id},
+        )
+
+        if not cleaning:
+            return None
+
+        return CleaningInDB(**cleaning)
+
+    async def get_all_cleanings(self) -> List[CleaningInDB]:
+        cleaning_records = await self.db.fetch_all(
+            query=GET_ALL_CLEANINGS_QUERY,
+        )
+
+        return [CleaningInDB(**l) for l in cleaning_records]
+
+    async def update_cleaning(
+        self, *, id: int, cleaning_update: CleaningUpdate,
+    ) -> CleaningInDB:
+        cleaning = await self.get_cleaning_by_id(id=id)
+
+        if not cleaning:
+            return None
+
+        cleaning_update_params = cleaning.copy(
+            update=cleaning_update.dict(exclude_unset=True),
+        )
+
+        if cleaning_update_params.cleaning_type is None:  # highlight-line
+            raise HTTPException(  # highlight-line
+                status_code=HTTP_400_BAD_REQUEST,  # highlight-line
+                detail="Invalid cleaning type. Cannot be None.",  # highlight-line
+            )  # highlight-line
+
+        try:
+            updated_cleaning = await self.db.fetch_one(
+                query=UPDATE_CLEANING_BY_ID_QUERY,
+                values=cleaning_update_params.dict(),
+            )
+            return CleaningInDB(**updated_cleaning)
+        except Exception as e:
+            print(e)
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="Invalid update params.",
+            )
+
+```
+
+Run those tests again and make sure everything passes.
+
+Now for the last endpoint.
+
+## Delete Endpoint
+
+We'll wrap this one up real quick, starting with the tests.
+
+```python:title=<span>test_cleanings.py</span>
+
+# ...other code
+
+
+class TestDeleteCleaning:
+    async def test_can_delete_cleaning_successfully(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        test_cleaning: CleaningInDB,
+    ) -> None:
+        # delete the cleaning
+        res = await client.delete(
+            app.url_path_for(
+                "cleanings:delete-cleaning-by-id",
+                id=test_cleaning.id,
+            ),
+        )
+        assert res.status_code == HTTP_200_OK
+        # ensure that the cleaning no longer exists
+        res = await client.get(
+            app.url_path_for(
+                "cleanings:get-cleaning-by-id",
+                id=test_cleaning.id,
+            ),
+        )
+        assert res.status_code == HTTP_404_NOT_FOUND
+
+    @pytest.mark.parametrize(
+        "id, status_code",
+        (
+            (500, 404),
+            (0, 422),
+            (-1, 422),
+            (None, 422),
+        ),
+    )
+    async def test_delete_cleaning_with_invalid_input_throws_error(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        test_cleaning: CleaningInDB,
+        id: int,
+        status_code: int,
+    ) -> None:
+        res = await client.delete(
+            app.url_path_for("cleanings:delete-cleaning-by-id", id=id),
+        )
+        assert res.status_code == status_code
+
+```
+
+More of the same here. We start by attempting to delete a cleaning from our database, and then we check to make sure it no longer exists. We also test that passing an invalid id return the response we want.
+
+Run those tests and watch them fail.
+
+And, like before, we implement the feature.
+
+```python:title=<span>api/routes/cleanings.py</span>
+
+@router.delete("/{id}/", response_model=int, name="cleanings:delete-cleaning-by-id")
+async def delete_cleaning_by_id(
+    id: int = Path(..., ge=1, title="The ID of the cleaning to delete."),
+    cleanings_repo: CleaningsRepository = Depends(get_repository(CleaningsRepository)),
+) -> int:
+    deleted_id = await cleanings_repo.delete_cleaning_by_id(id=id)
+
+    if not deleted_id:
+        raise HTTPException(
+            status_code=HTTP_404_NOT_FOUND,
+            detail="No cleaning found with that id.",
+        )
+
+    return deleted_id
+
+```
+
+We run our tests again and see a new error.
+
+This process is starting to feel familiar at this point, so we move on to our repository and write the `delete_cleaning_by_id` method.
+
+```python:title=<span>db/repositories/cleanings.py</span>
+from typing import List
+
+from fastapi import HTTPException
+from starlette.status import HTTP_400_BAD_REQUEST
+
+from app.db.repositories.base import BaseRepository
+from app.models.cleaning import CleaningCreate, CleaningUpdate, CleaningInDB
+
+
+CREATE_CLEANING_QUERY = """
+    INSERT INTO cleanings (name, description, price, cleaning_type)
+    VALUES (:name, :description, :price, :cleaning_type)
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+GET_CLEANING_BY_ID_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings
+    WHERE id = :id;
+"""
+
+GET_ALL_CLEANINGS_QUERY = """
+    SELECT id, name, description, price, cleaning_type
+    FROM cleanings;
+"""
+
+UPDATE_CLEANING_BY_ID_QUERY = """
+    UPDATE cleanings
+    SET name         = :name,
+        description  = :description,
+        price        = :price,
+        cleaning_type = :cleaning_type
+    WHERE id = :id
+    RETURNING id, name, description, price, cleaning_type;
+"""
+
+DELETE_CLEANING_BY_ID_QUERY = """
+    DELETE FROM cleanings 
+    WHERE id = :id 
+    RETURNING id;
+"""
+
+
+
+class CleaningsRepository(BaseRepository):
+    """"
+    All database actions associated with the Cleaning resource
+    """
+    async def create_cleaning(self, *, new_cleaning: CleaningCreate) -> CleaningInDB:
+        query_values = new_cleaning.dict()
+        cleaning = await self.db.fetch_one(
+            query=CREATE_CLEANING_QUERY,
+            values=query_values,
+        )
+
+        return CleaningInDB(**cleaning)
+
+    async def get_cleaning_by_id(self, *, id: int) -> CleaningInDB:
+        cleaning = await self.db.fetch_one(
+            query=GET_CLEANING_BY_ID_QUERY,
+            values={"id": id},
+        )
+
+        if not cleaning:
+            return None
+
+        return CleaningInDB(**cleaning)
+
+    async def get_all_cleanings(self) -> List[CleaningInDB]:
+        cleaning_records = await self.db.fetch_all(
+            query=GET_ALL_CLEANINGS_QUERY,
+        )
+
+        return [CleaningInDB(**l) for l in cleaning_records]
+
+    async def update_cleaning(
+        self, *, id: int, cleaning_update: CleaningUpdate,
+    ) -> CleaningInDB:
+        cleaning = await self.get_cleaning_by_id(id=id)
+
+        if not cleaning:
+            return None
+
+        cleaning_update_params = cleaning.copy(
+            update=cleaning_update.dict(exclude_unset=True),
+        )
+        if cleaning_update_params.cleaning_type is None:
+            raise HTTPException(
+                 status_code=HTTP_400_BAD_REQUEST,
+                 detail="Invalid cleaning type. Cannot be None.",
+            )
+
+        try:
+            updated_cleaning = await self.db.fetch_one(
+                query=UPDATE_CLEANING_BY_ID_QUERY,
+                values=cleaning_update_params.dict(),
+            )
+            return CleaningInDB(**updated_cleaning)
+        except Exception as e:
+            print(e)
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="Invalid update params.",
+            )
+
+    async def delete_cleaning_by_id(self, *, id: int) -> int:  # highlight-line
+        cleaning = await self.get_cleaning_by_id(id=id)  # highlight-line
+  # highlight-line
+        if not cleaning:  # highlight-line
+            return None  # highlight-line
+  # highlight-line
+        deleted_id = await self.db.execute(  # highlight-line
+            query=DELETE_CLEANING_BY_ID_QUERY,  # highlight-line
+            values={"id": id},  # highlight-line
+        )  # highlight-line
+  # highlight-line
+        return deleted_id  # highlight-line
+
+
+```
+
+We run our tests again and watch them all pass. Then we pat ourselves on the back and maybe go outside for a little bit.
+
+## Wrapping Up and Resources
+
+And just like that, we've configured our FastAPI backend to support managing our Cleanings resource using RESTful API conventions. One thing that should be mentioned is that it's always a good idea to manually test the endpoints using the interactive api docs FastAPI provides at `localhost:8000/docs`. Head there and make sure that everything works as expected. The OpenAPI docs are a powerful and convenient interface to our application and database, so don't sleep on them!
+
+With the grunt work out of the way, we're ready to move on to getting users signed up for our application. Feel free to check out any of these resources that were used to put this post together and maybe go outside for a little bit.
+
+- FasAPI [docs](https://fastapi.tiangolo.com/tutorial/path-params-numeric-validations/) for path parameters validation
+- Pydantic [docs](https://pydantic-docs.helpmanual.io/usage/exporting_models/) on exporting models
+- FastAPI [example repo](https://github.com/tiangolo/full-stack-fastapi-postgresql)
+- TestDriven.io [tutorial](https://testdriven.io/blog/fastapi-crud/) - Developing and Testing an Asynchronous API with FastAPI and Pytest
+
+## Github Repo
+
+All code up to this point can be found here:
+
+- https://github.com/Jastor11/phresh-tutorial/tree/part-5-resource-management-with-fastapi
+
+> Special thanks to Ermand Durro for correcting errors in the original code.

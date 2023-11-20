@@ -1,0 +1,27 @@
+---
+import type { OpenGraphSchema } from "./AstroSEO.astro"
+import * as parseUtils from "@/utils/parse-utils"
+
+type Props = {
+  optional?: OpenGraphSchema["optional"]
+}
+const props = Astro.props
+
+const optional = parseUtils.isDefined(props.optional) ? props.optional : null
+
+const audio = parseUtils.isDefined(optional) ? optional.audio : null
+const description = parseUtils.isDefined(optional) ? optional.description : null
+const determiner = parseUtils.isDefined(optional) ? optional.determiner : null
+const locale = parseUtils.isDefined(optional) ? optional.locale : null
+const localeAlternate = parseUtils.isDefined(optional) ? optional.localeAlternate : null
+const siteName = parseUtils.isDefined(optional) ? optional.siteName : null
+const video = parseUtils.isDefined(optional) ? optional.video : null
+---
+
+{audio ? <meta property="og:audio" content={audio} /> : null}
+{description ? <meta property="og:description" content={description} /> : null}
+{determiner ? <meta property="og:determiner" content={determiner} /> : null}
+{locale ? <meta property="og:locale" content={locale} /> : null}
+{localeAlternate?.map((locale: string) => <meta property="og:locale:alternate" content={locale} />)}
+{siteName ? <meta property="og:site_name" content={siteName} /> : null}
+{video ? <meta property="og:video" content={video} /> : null}

@@ -1,0 +1,31 @@
+---
+import { cn } from "@/utils/styles"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const wrapperClassnames = cn([
+  "flex flex-col items-center",
+  "max-w-screen-100% w-full",
+  "my-0 mx-auto",
+  "pt-6 xs:pt-12",
+  "max-w-screen-100%",
+  "mobile:max-w-screen-100%",
+  "xs:max-w-screen-95%",
+  "sm:max-w-screen-95%",
+  "md:max-w-screen-95%",
+  "tablet:max-w-screen-90%",
+  "lg:max-w-screen-85%",
+  "xl:max-w-screen-80%",
+  "2xl:max-w-screen-xl",
+  "",
+  className,
+])
+---
+
+<div class={wrapperClassnames}>
+  <slot />
+</div>

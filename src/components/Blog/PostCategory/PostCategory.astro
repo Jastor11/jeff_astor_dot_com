@@ -1,0 +1,35 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+import InternalLink from "@/components/Common/InternalLink.astro"
+import { formatCategoryLink } from "@/lib/links"
+import { cn } from "@/utils/styles"
+
+type Category = BlogPostWithMeta["data"]["category"] // string
+
+type Props = {
+  category: Category
+}
+
+const props = Astro.props
+
+const linkTo = formatCategoryLink(props.category)
+
+const wrapperClassnames = cn([
+  "blog-post-category",
+  "inline-block",
+  "text-light",
+  "bg-accent",
+  "uppercase font-bold text-[9px] tracking-wide",
+  "small-category-span-slant",
+  "rounded",
+  "px-1.5 pt-1 pb-2.5",
+  "mt-1 mb-1.5",
+  "post-tag-slant",
+])
+---
+
+<InternalLink href={linkTo} class="hover:no-underline">
+  <span class={wrapperClassnames}>
+    {props.category}
+  </span>
+</InternalLink>

@@ -1,0 +1,177 @@
+---
+import StyledH2 from "./H2.astro"
+import StyledP from "./P.astro"
+import StyledLink from "@/components/Common/ExternalLink.astro"
+import { cn } from "@/utils/styles"
+
+import betterLesson from "@/assets/images/better-lesson-blended-learning-project.png?url"
+import googleTechDev from "@/assets/images/google-tech-dev-guide-machine-learning.png?url"
+import upperline from "@/assets/images/teachers-upperline-code-platform.png?url"
+import sqlchallenges from "@/assets/images/sql_challenges.png?url"
+// TODO: Add Kode With Klossy
+// TODO: ADD CODEPATH
+// TODO: ADD SQL CHALLENGES
+// TODO: ADD PROJECTS PAGE
+
+const data = {
+  betterLesson: {
+    image: betterLesson,
+    link: "https://betterlesson.com/browse/master_teachers/blended",
+    alt: "better lesson blended learning project",
+  },
+  upperline: {
+    image: upperline,
+    link: "https://www.upperlinecode.com",
+    alt: "Upperline Code Teacher Onboarding Platform",
+  },
+  sqlchallenges: {
+    image: sqlchallenges,
+    link: "https://www.sqlchallenges.io/",
+    alt: "SQLChallenges.io learning platform",
+  },
+  techDev: {
+    image: googleTechDev,
+    link: "https://techdevguide.withgoogle.com/",
+    alt: "Google TechDev Machine Learning project",
+  },
+}
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const wrapperClassnames = cn(["flex-1", "h-auto", "m-4", ""])
+
+const imageAndDescriptionWrapperClassnames = cn(["flex flex-col items-center justify-between", "gap-8", className])
+---
+
+<section class={wrapperClassnames} {...props}>
+  <StyledH2>My Work</StyledH2>
+
+  <div class:list={["flex flex-col justify-start", "gap-2 2xl:gap-8"]}>
+    {/* BLENDED LEARNING MASTER TEACHER PROJECT */}
+    <div class={imageAndDescriptionWrapperClassnames}>
+      <span class="flex-1">
+        <StyledP>
+          {
+            `During my career as a teacher I've worked with a variety of partners on a range of issues in education.
+            I've served on the Bill and Melinda Gates Teacher Advisory Panel, taught the first two summers of 
+            Karlie Kloss's `
+          }
+          <StyledLink href="https://www.kodewithklossy.com/">Kode with Klossy</StyledLink>
+          {`  JavaScript courses, and participated in BetterLesson's first `}
+          <StyledLink href="https://betterlesson.com/browse/master_teachers/blended">
+            Blended Learning master teacher program
+          </StyledLink>
+          {`.`}
+        </StyledP>
+      </span>
+      <StyledLink href={data.betterLesson.link}>
+        <img
+          src={data.betterLesson.image}
+          alt="better lesson blended learning project"
+          class:list={[
+            "flex-1",
+            // "mt-8"
+          ]}
+        />
+      </StyledLink>
+    </div>
+
+    <div class={imageAndDescriptionWrapperClassnames}>
+      <span class="flex-1">
+        <StyledP>
+          {
+            `For the last half of the decade I've worked for organizations promoting 
+            access to high-quality education in the computer science sector. Since 2015, I've been an instructor for `
+          }
+
+          <StyledLink href="https://www.giantmachines.com/">Upperline School of Code</StyledLink>
+          {
+            ` (since acquired by GiantMachines) in New York, designing and teaching courses in software engineering, 
+            data science, and machine learning, while also building and maintaining their teacher onboarding platform.`
+          }
+        </StyledP>
+      </span>
+      <StyledLink href={data.upperline.link}>
+        <img src={data.upperline.image} alt={data.upperline.alt} class:list={["flex-1"]} />
+      </StyledLink>
+    </div>
+
+    <div class={imageAndDescriptionWrapperClassnames}>
+      <span class="flex-1">
+        <StyledP>
+          {
+            `In 2018, I served as the principal designer on the Google team that published
+        the machine learning and cloud computing pathways for Google's `
+          }
+          <StyledLink href="https://techdevguide.withgoogle.com/">Tech Dev Guide</StyledLink>
+          {
+            `. My work here ties heavily into my interests to curate
+        freely available content into easy-to-use learning guides.`
+          }
+        </StyledP>
+      </span>
+      <StyledLink href={data.techDev.link}>
+        <img src={data.techDev.image} alt={data.techDev.alt} class:list={["flex-1"]} />
+      </StyledLink>
+    </div>
+
+    <div class={imageAndDescriptionWrapperClassnames}>
+      <span class="flex-1">
+        <StyledP>
+          {
+            `More recently, I built and launched a PostgreSQL, Node, Express, and React course 
+            for collegiate computer science students that were participating in the SITE program hosted by `
+          }
+
+          <StyledLink href="https://www.codepath.org/">Codepath.org</StyledLink>
+          {`.`}
+        </StyledP>
+        <StyledP>
+          {
+            `The curriculum is composed of video lessons, learning labs, and weekly projects, puncuated by 
+            engaging activities such as the `
+          }
+          <StyledLink href="https://www.sqlchallenges.io/">SQLChallenges.io</StyledLink>
+          {` site I built into the scope and sequence.`}
+        </StyledP>
+        <StyledP>
+          {`Built with `}
+          <StyledLink href="https://www.gatsbyjs.com/">Gatsby.js</StyledLink>
+          {` and custom React components build into `}
+          <StyledLink href="https://mdxjs.com/">MDX</StyledLink>
+          {
+            `-flavored markdown, the mini-app is designed to teach students SQL by solving real-word, data-focused puzzles. `
+          }
+          {
+            `Besides the custom, browser-based editor, the rest of the application is powered by an actual in-memory SQLite database
+            ported to the client using WebAssembly, and pre-loaded with interesting datasets sourced from `
+          }
+          <StyledLink href="https://www.kaggle.com/">Kaggle</StyledLink>
+          {`.`}
+        </StyledP>
+      </span>
+      <StyledLink href={data.sqlchallenges.link}>
+        <img src={data.sqlchallenges.image} alt={data.sqlchallenges.alt} class:list={["flex-1"]} />
+      </StyledLink>
+    </div>
+
+    <div>
+      <StyledP>
+        {
+          `Currently, I'm working on the personalization team embedded within the entertainment and technology division at `
+        }
+        <StyledLink href="https://www.disney.com/">The Walt Disney Company</StyledLink>
+        {`.`}
+      </StyledP>
+      <StyledP>
+        {`If you're interested in working together in any of these disciplines - or just want to chat - please `}
+        <StyledLink href="/contact">get in touch</StyledLink>
+        {`. I split my time between Brooklyn, NY and Santa Monica, CA and rarely turn down free caffeine.`}
+      </StyledP>
+    </div>
+  </div>
+</section>

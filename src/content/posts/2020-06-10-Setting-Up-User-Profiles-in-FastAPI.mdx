@@ -1,0 +1,1103 @@
+---
+title: "Setting Up User Profiles in FastAPI"
+category: "Databases"
+date: "06/10/2020"
+modified: "03/09/2021"
+published: "true"
+slug: "setting-up-user-profiles-in-fastapi"
+series: up-and-running-with-fastapi
+tags:
+  - python
+  - fastapi
+  - server
+  - postgres
+  - databases
+  - docker
+  - pytest
+  - testing
+---
+
+import FastAPISeriesList from "@/components/MDX/series/FastAPI.astro"
+
+Welcome to Part 9 of Up and Running with FastAPI. If you missed part 8, you can find it [here](/blog/authentication-dependencies-in-fastapi).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={9} />
+
+In the previous post we implemented a proper login flow using FastAPI's built in OAuth2 system. On top of that, we built out dependencies that ensure users can access protected routes using JSON Web Tokens. With authentication out of the way, we can focus on user presence and how users interact with our application. We'll be building out user profiles and ownership, which is a non-trivial task. This post will be particularly long and most solutions will simply require us to bust out some SQL, so get ready.
+
+Let's begin by giving users the ability to customize their profiles.
+
+## Creating User Profiles
+
+We'll need to update our database to support profiles, as we'll want to give our users the ability to customize their online presence and interact with other user's profiles. Every user's id serves as a foreign key for items they own, and profiles are no different. So we'll need to account for that as well.
+
+As with any modification to the database, we start with the migrations file.
+
+### Migrations
+
+Before we make any adjustments, let's roll back our migrations.
+
+```bash
+docker ps
+docker exec -it [CONTAINER_ID] bash
+alembic downgrade base
+```
+
+Now go ahead and open up the file that looks like: `db/migrations/versions/12345678654_create_main_tables.py`.
+
+```python
+"""create main tables
+
+Revision ID: 12345678654
+Revises:
+Create Date: 2020-05-05 10:41:35.468471
+
+"""
+from typing import Tuple
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic
+revision = "895636233437"
+down_revision = None
+branch_labels = None
+depends_on = None
+
+
+def create_updated_at_trigger() -> None:
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION update_updated_at_column()
+            RETURNS TRIGGER AS
+        $$
+        BEGIN
+            NEW.updated_at = now();
+            RETURN NEW;
+        END;
+        $$ language 'plpgsql';
+        """
+    )
+
+
+def timestamps(indexed: bool = False) -> Tuple[sa.Column, sa.Column]:
+    return (
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+            index=indexed,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+            index=indexed,
+        ),
+    )
+
+
+def create_cleanings_table() -> None:
+    op.create_table(
+        "cleanings",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("name", sa.Text, nullable=False, index=True),
+        sa.Column("description", sa.Text, nullable=True),
+        sa.Column("cleaning_type", sa.Text, nullable=False, server_default="spot_clean"),
+        sa.Column("price", sa.Numeric(10, 2), nullable=False),
+        *timestamps(indexed=True),
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_cleanings_modtime
+            BEFORE UPDATE
+            ON cleanings
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def create_users_table() -> None:
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("username", sa.Text, unique=True, nullable=False, index=True),
+        sa.Column("email", sa.Text, unique=True, nullable=False, index=True),
+        sa.Column("email_verified", sa.Boolean, nullable=False, server_default="False"),
+        sa.Column("salt", sa.Text, nullable=False),
+        sa.Column("password", sa.Text, nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="True"),
+        sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default="False"),
+        *timestamps(),
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_user_modtime
+            BEFORE UPDATE
+            ON users
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def create_profiles_table() -> None:
+    op.create_table(
+        "profiles",
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("full_name", sa.Text, nullable=True),
+        sa.Column("phone_number", sa.Text, nullable=True),
+        sa.Column("bio", sa.Text, nullable=True, server_default=""),
+        sa.Column("image", sa.Text, nullable=True),
+        sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id", ondelete="CASCADE")),
+        *timestamps(),
+    )
+    op.execute(
+        """
+        CREATE TRIGGER update_profiles_modtime
+            BEFORE UPDATE
+            ON profiles
+            FOR EACH ROW
+        EXECUTE PROCEDURE update_updated_at_column();
+        """
+    )
+
+
+def upgrade() -> None:
+    create_updated_at_trigger()
+    create_cleanings_table()
+    create_users_table()
+    create_profiles_table()
+
+
+def downgrade() -> None:
+    op.drop_table("profiles")
+    op.drop_table("users")
+    op.drop_table("cleanings")
+    op.execute("DROP FUNCTION update_updated_at_column")
+
+```
+
+A couple things to note here. We're adding a profiles table to our database that stores supplementary information about a user. We're using the SQLAlchemy's `sa.ForeignKey` table constraint to specify that each record in the `profiles` table belongs to a record in the `users` table.
+
+While it's often convenient to keep all user-related information in a single table, we aren't taking that approach here. Instead, we'll keep authentication information in the `users` table and personal information in the `profiles` table. When we want to get both, we'll simply join the tables in our SQL query.
+
+In our case, the flexibility of this approach outweighs the cost of joining the tables whenever a user is queried. We're also able to add an arbitrary number of columns to the profile model and attach an unlimited number of profile types to a single user.
+
+At the end of the file, we've adjusted the `upgrade` and `downgrade` functions for our migrations runner.
+
+With that out the way, it's time to migrate the database by entering the container like before (unless we're already there) and running the `alembic upgrade head` command.
+
+```bash
+docker ps
+docker exec -it [CONTAINER_ID] bash
+alembic upgrade head
+```
+
+### Profile Models
+
+Let's go ahead and create models for our user profiles.
+
+Create a new file in the `models` directory called `profile.py`.
+
+```bash
+touch backend/app/models/profile.py
+```
+
+And inside that file, add the following:
+
+```python:title=<span>models/profile.py</span>
+from typing import Optional
+
+from pydantic import EmailStr, HttpUrl
+
+from app.models.core import DateTimeModelMixin, IDModelMixin, CoreModel
+
+
+class ProfileBase(CoreModel):
+    full_name: Optional[str]
+    phone_number: Optional[str]
+    bio: Optional[str]
+    image: Optional[HttpUrl]
+
+
+class ProfileCreate(ProfileBase):
+    """
+    The only field required to create a profile is the users id
+    """
+    user_id: int
+
+
+class ProfileUpdate(ProfileBase):
+    """
+    Allow users to update any or no fields, as long as it's not user_id
+    """
+    pass
+
+
+class ProfileInDB(IDModelMixin, DateTimeModelMixin, ProfileBase):
+    user_id: int
+    username: Optional[str]
+    email: Optional[EmailStr]
+
+
+class ProfilePublic(ProfileInDB):
+    pass
+
+```
+
+Nothing crazy going on here.
+
+The profile is standard, so most of the work is done by inheriting from our base model and mixins. Though our `profiles` table doesn't have a `username` field or an `email` field, we still add them to the `ProfileInDB` model. The `ProfilePublic` model inherits them as well. Depending on the situation, this may be useful for displaying user profiles in our UI. We've also specified that the image must by an http url - validated for us by pydantic.
+
+### Testing User Profiles
+
+Let's make some tests. We want tests that ensure a profile is created for a user when they register, that users can see other users' profiles when they're authenticated, and that users can update their own profile. In a future post, we'll add a social component to our application and test that as well.
+
+We'll do this in pieces, taking it one step at a time.
+
+Start, by creating a new file called `test_profiles.py`.
+
+```bash
+touch backend/tests/test_profiles.py
+```
+
+And add the following to it.
+
+```python:title=<span>tests/test_profiles.py</span>
+import pytest
+
+from databases import Database
+
+from fastapi import FastAPI, status
+from httpx import AsyncClient
+
+from app.models.user import UserInDB
+
+
+pytestmark = pytest.mark.asyncio
+
+
+class TestProfilesRoutes:
+    """
+    Ensure that no api route returns a 404
+    """
+
+    async def test_routes_exist(self, app: FastAPI, client: AsyncClient, test_user: UserInDB) -> None:
+        # Get profile by username
+        res = await client.get(app.url_path_for("profiles:get-profile-by-username", username=test_user.username))
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+        # Update own profile
+        res = await client.put(app.url_path_for("profiles:update-own-profile"), json={"profile_update": {}})
+        assert res.status_code != status.HTTP_404_NOT_FOUND
+
+```
+
+Baby steps here, as we're only checking to see if 2 routes exists: one to fetch a profile by a user's username and one to update a user's own profile. We've also started using `from fastapi import status` for our status codes. No specific reason for doing it this way. We simply take this approach because it requires fewer lines than importing status codes from `starlette` directly.
+
+Run the tests and watch them fail.
+
+```bash
+docker ps
+docker exec -it [CONTAINER_ID] bash
+pytest tests/test_profiles.py -v -p no:warnings
+```
+
+Making these two tests pass is easy enough. Let's create a new route file in the `api/routes/` directory.
+
+```bash
+touch backend/app/api/routes/profiles.py
+```
+
+And we can start adding to it like so:
+
+```python:title=<span>api/routes/profiles.py</span>
+from fastapi import APIRouter, Path, Body
+
+from app.models.profile import ProfileUpdate, ProfilePublic
+
+
+router = APIRouter()
+
+
+@router.get("/{username}/", response_model=ProfilePublic, name="profiles:get-profile-by-username")
+async def get_profile_by_username(
+    *, username: str = Path(..., min_length=3, regex="^[a-zA-Z0-9_-]+$"),
+) -> ProfilePublic:
+    return None
+
+
+@router.put("/me/", response_model=ProfilePublic, name="profiles:update-own-profile")
+async def update_own_profile(profile_update: ProfileUpdate = Body(..., embed=True)) -> ProfilePublic:
+    return None
+
+```
+
+We've defined a `GET` route and a `PUT` route for fetching and updating profiles, respectively. No logic here yet, as they both simply return `None`. The only thing to pay attention to is that we're validating the `username` in the same way as in our `UserCreate` and `UserUpdate` models. It must be at least 3 characters long and consist of only letters, numbers, underscores and dashes.
+
+We'll need to register this new router with our api router so open up the `api/routes/__init__.py` file.
+
+```python:title=<span>api/routes/__init__.py</span>
+from fastapi import APIRouter
+
+from app.api.routes.cleanings import router as cleanings_router
+from app.api.routes.users import router as users_router
+from app.api.routes.profiles import router as profiles_router  # highlight-line
+
+router = APIRouter()
+
+router.include_router(cleanings_router, prefix="/cleanings", tags=["cleanings"])
+router.include_router(users_router, prefix="/users", tags=["users"])
+router.include_router(profiles_router, prefix="/profiles", tags=["profiles"])  # highlight-line
+
+```
+
+Same as before, we attach our profiles router to the api router under the `/profiles` namespace.
+
+Now when we run our tests again they should pass.
+
+Let's move on and add the next test class to our `test_profiles.py` file.
+
+```python:title=<span>tests/test_profiles.py</span>
+# ... other code
+
+from app.models.user import UserInDB, UserPublic
+from app.models.profile import ProfileInDB, ProfilePublic
+from app.db.repositories.profiles import ProfilesRepository
+
+
+# ...other code
+
+
+class TestProfileCreate:
+    async def test_profile_created_for_new_users(self, app: FastAPI, client: AsyncClient, db: Database) -> None:
+        profiles_repo = ProfilesRepository(db)
+
+        new_user = {"email": "dwayne@johnson.io", "username": "therock", "password": "dwaynetherockjohnson"}
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code == status.HTTP_201_CREATED
+
+        created_user = UserPublic(**res.json())
+        user_profile = await profiles_repo.get_profile_by_user_id(user_id=created_user.id)
+        assert user_profile is not None
+        assert isinstance(user_profile, ProfileInDB)
+
+```
+
+As soon as we try to run our tests, we'll get an import error. We don't have a `ProfilesRepository` yet, so let's make one.
+
+```bash
+touch backend/app/db/repositories/profiles.py
+```
+
+And let's build it out with two new fancy methods.
+
+```python:title=<span>db/repositories/profiles.py</span>
+from app.db.repositories.base import BaseRepository
+from app.models.profile import ProfileCreate, ProfileUpdate, ProfileInDB
+
+
+CREATE_PROFILE_FOR_USER_QUERY = """
+    INSERT INTO profiles (full_name, phone_number, bio, image, user_id)
+    VALUES (:full_name, :phone_number, :bio, :image, :user_id)
+    RETURNING id, full_name, phone_number, bio, image, user_id, created_at, updated_at;
+"""
+
+GET_PROFILE_BY_USER_ID_QUERY = """
+    SELECT id, full_name, phone_number, bio, image, user_id, created_at, updated_at
+    FROM profiles
+    WHERE user_id = :user_id;
+"""
+
+
+class ProfilesRepository(BaseRepository):
+    async def create_profile_for_user(self, *, profile_create: ProfileCreate) -> ProfileInDB:
+        created_profile = await self.db.fetch_one(query=CREATE_PROFILE_FOR_USER_QUERY, values=profile_create.dict())
+
+        return created_profile
+
+    async def get_profile_by_user_id(self, *, user_id: int) -> ProfileInDB:
+        profile_record = await self.db.fetch_one(query=GET_PROFILE_BY_USER_ID_QUERY, values={"user_id": user_id})
+
+        if not profile_record:
+            return None
+
+        return ProfileInDB(**profile_record)
+
+```
+
+Our new `ProfilesRepository` is now ready for use. It can create profiles for new users and fetch a profile when provided the `user_id`. If we run our tests now, we should see that our latest test is failing. When we attempt to fetch the newly created user's profile, we get `None`. Let's make sure that when a new user is created, our `UsersRepository` also creates a profile for that user.
+
+Open up the `db/repositories/users.py` file and update it like so:
+
+```python:title=<span>db/repositories/users.py</span>
+# ...other code
+
+from app.db.repositories.profiles import ProfilesRepository
+from app.models.profile import ProfileCreate
+
+# ...other code
+
+
+class UsersRepository(BaseRepository):
+    def __init__(self, db: Database) -> None:
+        super().__init__(db)
+        self.auth_service = auth_service
+        self.profiles_repo = ProfilesRepository(db)  # highlight-line
+
+    # ...other code
+
+    async def register_new_user(self, *, new_user: UserCreate) -> UserInDB:
+        # make sure email isn't already taken
+        if await self.get_user_by_email(email=new_user.email):
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="That email is already taken. Login with that email or register with another one."
+            )
+
+        # make sure username isn't already taken
+        if await self.get_user_by_username(username=new_user.username):
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST,
+                detail="That username is already taken. Please try another one."
+            )
+
+        user_password_update = self.auth_service.create_salt_and_hashed_password(
+            plaintext_password=new_user.password,
+        )
+        new_user_params = new_user.copy(update=user_password_update.dict())
+        created_user = await self.db.fetch_one(
+            query=REGISTER_NEW_USER_QUERY, 
+            values=new_user_params.dict(),
+        )
+
+        # highlight-start
+        await self.profiles_repo.create_profile_for_user(
+            profile_create=ProfileCreate(user_id=created_user["id"]),
+        )
+        # highlight-end
+
+        return UserInDB(**created_user)
+
+    # ...other code
+
+```
+
+This is a useful pattern that we'll take advantage of regularly. By adding the `ProfilesRepository` as a sub-repo of the `UsersRepository`, we can insert any profile-related logic directly into our user-related logic. And we do just that here. Once a user registers with our application, we take the newly created user's id and use it to add an empty profile to our database. If we want to allow users to sign up with additional information, we can pass that along here as well.
+
+Run the tests again and they should all pass.
+
+## Fetching and Updating Profiles
+
+Let's flesh out those two empty routes we created earlier, starting with some tests.
+
+In the `conftest.py` file, add a new fixture.
+
+```python:title=<span>tests/conftest.py</span>
+# ...other code
+
+@pytest.fixture
+async def test_user2(db: Database) -> UserInDB:
+    new_user = UserCreate(
+        email="serena@williams.io",
+        username="serenawilliams",
+        password="tennistwins",
+    )
+
+    user_repo = UsersRepository(db)
+
+    existing_user = await user_repo.get_user_by_email(email=new_user.email)
+    if existing_user:
+        return existing_user
+
+    return await user_repo.register_new_user(new_user=new_user)
+
+```
+
+Now, let's use it in our `test_profiles.py` file.
+
+```python:title=<span>tests/test_profiles.py</span>
+# ...other code
+
+
+class TestProfileView:
+    async def test_authenticated_user_can_view_other_users_profile(
+        self, app: FastAPI, authorized_client: AsyncClient, test_user: UserInDB, test_user2: UserInDB
+    ) -> None:
+        res = await authorized_client.get(
+            app.url_path_for("profiles:get-profile-by-username", username=test_user2.username)
+        )
+        assert res.status_code == status.HTTP_200_OK
+        profile = ProfilePublic(**res.json())
+        assert profile.username == test_user2.username
+
+    async def test_unregistered_users_cannot_access_other_users_profile(
+        self, app: FastAPI, client: AsyncClient, test_user2: UserInDB
+    ) -> None:
+        res = await client.get(
+            app.url_path_for("profiles:get-profile-by-username", username=test_user2.username)
+        )
+        assert res.status_code == status.HTTP_401_UNAUTHORIZED
+
+    async def test_no_profile_is_returned_when_username_matches_no_user(
+        self, app: FastAPI, authorized_client: AsyncClient
+    ) -> None:
+        res = await authorized_client.get(
+            app.url_path_for("profiles:get-profile-by-username", username="username_doesnt_match")
+        )
+        assert res.status_code == status.HTTP_404_NOT_FOUND
+
+```
+
+In the first test, we check to see if `test_user` can access the profile of `test_user2`. Since our `authorized_client` uses the JWT token for `test_user`, this is relatively straightforward to implement. In the second test, we attempt to do the same thing, except with an unauthorized client. We expect to see it fail. Our third test simply ensures that a 404 is returned when the username has no corresponding profile.
+
+Run the tests and watch them fail.
+
+Let's start in the `api/routes/profiles.py` file. Here's the updated file.
+
+```python:title=<span>api/routes/profiles.py</span>
+from fastapi import Depends, APIRouter, HTTPException, Path, Body, status
+
+from app.api.dependencies.auth import get_current_active_user
+from app.api.dependencies.database import get_repository
+
+from app.models.user import UserCreate, UserUpdate, UserInDB, UserPublic
+from app.models.profile import ProfileUpdate, ProfilePublic
+
+from app.db.repositories.profiles import ProfilesRepository
+
+
+router = APIRouter()
+
+
+@router.get("/{username}/", response_model=ProfilePublic, name="profiles:get-profile-by-username")
+async def get_profile_by_username(
+    username: str = Path(..., min_length=3, regex="^[a-zA-Z0-9_-]+$"),
+    current_user: UserInDB = Depends(get_current_active_user),
+    profiles_repo: ProfilesRepository = Depends(get_repository(ProfilesRepository)),
+) -> ProfilePublic:
+    profile = await profiles_repo.get_profile_by_username(username=username)
+
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="No profile found with that username.",
+        )
+
+    return profile
+
+
+@router.put("/me/", response_model=ProfilePublic, name="profiles:update-own-profile")
+async def update_own_profile(profile_update: ProfileUpdate = Body(..., embed=True)) -> ProfilePublic:
+    return None
+
+```
+
+Run the tests again and the last one should pass. Simply by including the `get_current_active_user` dependency, we protect this route from unauthenticated requests. The other two tests are failing because we haven't implemented the `get_profile_by_username` method on our `ProfilesRepository`.
+
+This will be mostly an exercise in SQL, so let's get to it.
+
+```python:title=<span>db/repositories/profiles.py</span>
+from app.models.user import UserInDB
+
+# ...other code
+
+GET_PROFILE_BY_USERNAME_QUERY = """
+    SELECT p.id,
+           u.email AS email,
+           u.username AS username,
+           full_name,
+           phone_number,
+           bio,
+           image,
+           user_id,
+           p.created_at,
+           p.updated_at
+    FROM profiles p
+        INNER JOIN users u
+        ON p.user_id = u.id
+    WHERE user_id = (SELECT id FROM users WHERE username = :username);
+"""
+
+
+class ProfilesRepository(BaseRepository):
+    # ...other code
+
+    async def get_profile_by_username(self, *, username: str) -> ProfileInDB:
+        profile_record = await self.db.fetch_one(
+            query=GET_PROFILE_BY_USERNAME_QUERY, 
+            values={"username": username},
+        )
+
+        if profile_record:
+            return ProfileInDB(**profile_record)
+
+```
+
+Before we get to the SQL, let's talk about what we're trying to accomplish. We want to take in a username and check in our database for any user with that username. If we find that username, we want to grab their email and username. Then we want to attach it to the profile associated with that user and return the `ProfileInDB` model with all of the attributes.
+
+To make that all happen, we join the `profiles` and `users` table together for a user that matches the sub-query:
+
+```sql
+SELECT id FROM users WHERE username = :username;
+```
+
+We then only select the username and email from the `users` table, while selecting all fields from the `profiles` table.
+
+Run the tests again and they should all pass.
+
+## Attaching Profiles to UserPublic Models
+
+Let's refactor our application models a bit. We're going to attach public user profiles to user models that are returned by our user routes.
+
+Start with the `models/user.py` file and update it like so:
+
+```python:title=<span>models/user.py</span>
+# ...other code
+
+from app.models.profile import ProfilePublic
+
+# ...other code
+
+
+class UserPublic(IDModelMixin, DateTimeModelMixin, UserBase):
+    access_token: Optional[AccessToken]
+    profile: Optional[ProfilePublic]
+
+```
+
+Now we have the ability to attach a user profile to our `UserPublic` models. Seems simple enough, right? Though it's a small change, implementing this update will require modifications in a few places across our codebase. Check it out.
+
+In the `UsersRepository` add a new method that makes it easy to populate the user with their profile.
+
+Here's the whole file in its entirety.
+
+```python:title=<span>db/repositories/users.py</span>
+from typing import Optional
+
+from pydantic import EmailStr
+from fastapi import HTTPException, status
+from databases import Database
+
+from app.db.repositories.base import BaseRepository
+from app.db.repositories.profiles import ProfilesRepository
+from app.models.profile import ProfileCreate, ProfilePublic  # highlight-line
+from app.models.user import UserCreate, UserUpdate, UserInDB, UserPublic
+from app.services import auth_service
+
+
+GET_USER_BY_EMAIL_QUERY = """
+    SELECT id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at
+    FROM users
+    WHERE email = :email;
+"""
+
+GET_USER_BY_USERNAME_QUERY = """
+    SELECT id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at
+    FROM users
+    WHERE username = :username;
+"""
+
+REGISTER_NEW_USER_QUERY = """
+    INSERT INTO users (username, email, password, salt)
+    VALUES (:username, :email, :password, :salt)
+    RETURNING id, username, email, email_verified, password, salt, is_active, is_superuser, created_at, updated_at;
+"""
+
+
+class UsersRepository(BaseRepository):
+    def __init__(self, db: Database) -> None:
+        super().__init__(db)
+        self.auth_service = auth_service
+        self.profiles_repo = ProfilesRepository(db)
+
+    # highlight-start
+    async def get_user_by_email(self, *, email: EmailStr, populate: bool = True) -> UserInDB:
+        user_record = await self.db.fetch_one(
+            query=GET_USER_BY_EMAIL_QUERY, 
+            values={"email": email},
+        )
+
+        if user_record:
+            user = UserInDB(**user_record)
+
+            if populate:
+                return await self.populate_user(user=user)
+
+            return user
+    # highlight-end
+
+    # highlight-start
+    async def get_user_by_username(self, *, username: str, populate: bool = True) -> UserInDB:
+        user_record = await self.db.fetch_one(
+            query=GET_USER_BY_USERNAME_QUERY, 
+            values={"username": username},
+        )
+
+        if user_record:
+            user = UserInDB(**user_record)
+
+            if populate:
+                return await self.populate_user(user=user)
+
+            return user
+    # highlight-end
+
+    async def register_new_user(self, *, new_user: UserCreate) -> UserInDB:
+        if await self.get_user_by_email(email=new_user.email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That email is already taken. Login with that email or register with another one.",
+            )
+
+        if await self.get_user_by_username(username=new_user.username):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That username is already taken. Please try another one.",
+            )
+
+        user_password_update = self.auth_service.create_salt_and_hashed_password(
+            plaintext_password=new_user.password,
+        )
+        new_user_params = new_user.copy(update=user_password_update.dict())
+        created_user = await self.db.fetch_one(
+            query=REGISTER_NEW_USER_QUERY, 
+            values=new_user_params.dict(),
+        )
+
+        # highlight-start
+        # create profile for new user
+        await self.profiles_repo.create_profile_for_user(
+            profile_create=ProfileCreate(user_id=created_user["id"]),
+        )
+
+        return await self.populate_user(user=UserInDB(**created_user))
+        # highlight-end
+
+    async def authenticate_user(self, *, email: EmailStr, password: str) -> Optional[UserInDB]:
+        user = await self.get_user_by_email(email=email, populate=False) # highlight-line
+
+        if not user:
+            return None
+
+        if not self.auth_service.verify_password(
+            password=password, salt=user.salt, hashed_pw=user.password
+        ):
+            return None
+
+        return user
+
+    # highlight-start
+    async def populate_user(self, *, user: UserInDB) -> UserInDB:
+        return UserPublic(
+            # unpack the user in db dict into the UserPublic model
+            # which will remove "password" and "salt"
+            **user.dict(),
+            # fetch the user's profile from the profiles repo
+            profile=await self.profiles_repo.get_profile_by_user_id(user_id=user.id)
+        )
+    # highlight-end
+
+```
+
+Wow, ok. A lot of changes here.
+
+The key piece is our new `populate_user` method which takes advantage of the `profiles_repo` to attach a user's profile onto the `UserPublic` model. In both our `get_user_by_email` and `get_user_by_username` methods we've added a new `populate` parameter that determines whether or not we should simply return the `UserInDB` model or return the result of calling our `populate_user` method. Adding this parameter is nice, because it means that when we don't need the user's profile or actually want to access the user's `password` and `salt` - like in our `authenticate_user` method - we can set `populate=False` and only get the `UserInDB` model back.
+
+There's a problem though. This refactor works, which we'll see in a minute. But if we run our tests, many of them are failing.
+
+The main problem is with our authentication service. Open up `services/authentication.py` and update it like so:
+
+```python:title=<span>services/authentication.py</span>
+from typing import Optional, Type
+
+# ...other code
+
+from app.models.user import UserBase, UserPasswordUpdate  # highlight-line
+
+# ...other code
+
+
+class AuthService:
+    # ...other code
+
+    def create_access_token_for_user(
+        self,
+        *,
+        user: Type[UserBase],  # highlight-line
+        secret_key: str = str(SECRET_KEY),
+        audience: str = JWT_AUDIENCE,
+        expires_in: int = ACCESS_TOKEN_EXPIRE_MINUTES,
+    ) -> str:
+        if not user or not isinstance(user, UserBase):  # highlight-line
+            return None
+
+        jwt_meta = JWTMeta(
+            aud=audience,
+            iat=datetime.timestamp(datetime.utcnow()),
+            exp=datetime.timestamp(datetime.utcnow() + timedelta(minutes=expires_in)),
+        )
+        jwt_creds = JWTCreds(sub=user.email, username=user.username)
+        token_payload = JWTPayload(
+            **jwt_meta.dict(),
+            **jwt_creds.dict(),
+        )
+        # NOTE - previous versions of pyjwt ("<2.0") returned the token as bytes insted of a string.
+        # That is no longer the case and the `.decode("utf-8")` has been removed.
+        access_token = jwt.encode(token_payload.dict(), secret_key, algorithm=JWT_ALGORITHM)
+
+        return access_token
+
+```
+
+When creating access tokens, we were previously checking that the user we passed was an instance of `UserInDB`. Since that might not always be the case, we're switching to the parent class that both `UserInDB` and `UserPublic` inherit from - `UserBase`. This ensures that our access token is created for instances of both models without failure.
+
+We're going to need to update our tests to reflect the new changes as well, so open up the `tests/test_users.py` file and modify it like so:
+
+```python:title=<span>tests/test_users.py</span>
+# ...other code
+
+
+class TestUserRegistration:
+    async def test_users_can_register_successfully(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        db: Database,
+    ) -> None:
+        user_repo = UsersRepository(db)
+        new_user = {"email": "shakira@shakira.io", "username": "shakirashakira", "password": "chantaje"}
+
+        # make sure user doesn't exist yet
+        user_in_db = await user_repo.get_user_by_email(email=new_user["email"])
+        assert user_in_db is None
+
+        # send post request to create user and ensure it is successful
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code == HTTP_201_CREATED
+
+        # ensure that the user now exists in the db
+        user_in_db = await user_repo.get_user_by_email(email=new_user["email"], populate=False)  # highlight-line
+        assert user_in_db is not None
+        assert user_in_db.email == new_user["email"]
+        assert user_in_db.username == new_user["username"]
+
+        # check that the user returned in the response is equal to the user in the database
+        created_user = UserPublic(**res.json()).dict(exclude={"access_token", "profile"})  # highlight-line
+        assert created_user == user_in_db.dict(exclude={"password", "salt"})
+
+    # ...other code
+
+    async def test_users_saved_password_is_hashed_and_has_salt(
+        self,
+        app: FastAPI,
+        client: AsyncClient,
+        db: Database,
+    ) -> None:
+        user_repo = UsersRepository(db)
+        new_user = {"email": "beyonce@knowles.io", "username": "queenbey", "password": "destinyschild"}
+
+        # send post request to create user and ensure it is successful
+        res = await client.post(app.url_path_for("users:register-new-user"), json={"new_user": new_user})
+        assert res.status_code == HTTP_201_CREATED
+
+        # ensure that the users password is hashed in the db
+        # and that we can verify it using our auth service
+        user_in_db = await user_repo.get_user_by_email(email=new_user["email"], populate=False)  # highlight-line
+        assert user_in_db is not None
+        assert user_in_db.salt is not None and user_in_db.salt != "123"
+        assert user_in_db.password != new_user["password"]
+        assert auth_service.verify_password(
+            password=new_user["password"],
+            salt=user_in_db.salt,
+            hashed_pw=user_in_db.password,
+        )
+
+# ...other code
+
+```
+
+Alright, nothing too serious here. Mostly updating the `get_user_by_email` methods to use the new `populate` parameter and set it to `False` in both tests to keep the same behavior we were expecting before. We also exclude the new `profile` attribute on our `UserPublic` model that reflects the changes we've made up to this point.
+
+The ability to easily manipulate pydantic models will prove useful time and time again. In fact, let's do it one more time and fix the last issue we'll get when returning newly registered users.
+
+Open up the `api/routes/users.py` file and make one minor change.
+
+```python:title=<span>api/routes/users.py</span>
+# ...other code
+
+@router.post(
+    "/", 
+    response_model=UserPublic, 
+    name="users:register-new-user", 
+    status_code=HTTP_201_CREATED,
+)
+async def register_new_user(
+    new_user: UserCreate = Body(..., embed=True),
+    user_repo: UsersRepository = Depends(get_repository(UsersRepository)),
+) -> UserPublic:
+    created_user = await user_repo.register_new_user(new_user=new_user)
+
+    access_token = AccessToken(
+        access_token=auth_service.create_access_token_for_user(user=created_user), 
+        token_type="bearer",
+    )
+
+    return created_user.copy(update={"access_token": access_token})
+
+# ...other code
+
+```
+
+Since we're now returning a `UserPublic` model upon registration, we can simply update the `access_token` attribute with our new token and return that user. Simple enough.
+
+Run the tests again and they should all be passing.
+
+And voila! Users should now have their profiles attached when they are returned from our API. Try it out in the interactive docs at `localhost:8000/docs`.
+
+## Updating Profiles
+
+Now let's make sure users can update their own profiles.
+
+Create a new test class in `test_profiles.py`.
+
+```python:title=<span>tests/test_profiles.py</span>
+# ...other code
+
+
+class TestProfileManagement:
+    @pytest.mark.parametrize(
+        "attr, value",
+        (
+            ("full_name", "Lebron James"),
+            ("phone_number", "555-333-1000"),
+            ("bio", "This is a test bio"),
+            ("image", "http://testimages.com/testimage"),
+        ),
+    )
+    async def test_user_can_update_own_profile(
+        self, 
+        app: FastAPI, 
+        authorized_client: AsyncClient, 
+        test_user: UserInDB, 
+        attr: str, 
+        value: str,
+    ) -> None:
+        assert getattr(test_user.profile, attr) != value
+        res = await authorized_client.put(
+            app.url_path_for("profiles:update-own-profile"), 
+            json={"profile_update": {attr: value}},
+        )
+        assert res.status_code == status.HTTP_200_OK
+        profile = ProfilePublic(**res.json())
+        assert getattr(profile, attr) == value
+
+    @pytest.mark.parametrize(
+        "attr, value, status_code",
+        (
+            ("full_name", [], 422),
+            ("bio", {}, 422),
+            ("image", "./image-string.png", 422),
+            ("image", 5, 422),
+        ),
+    )
+    async def test_user_recieves_error_for_invalid_update_params(
+        self,
+        app: FastAPI,
+        authorized_client: AsyncClient,
+        test_user: UserInDB,
+        attr: str,
+        value: str,
+        status_code: int,
+    ) -> None:
+        res = await authorized_client.put(
+            app.url_path_for("profiles:update-own-profile"), 
+            json={"profile_update": {attr: value}},
+        )
+        assert res.status_code == status_code
+
+```
+
+Run the tests and watch them fail.
+
+Open up the `api/routes/profiles.py` file and update the `PUT` route like so:
+
+```python:title=<span>api/routes/profiles.py</span>
+# ...other code
+
+@router.put("/me/", response_model=ProfilePublic, name="profiles:update-own-profile")
+async def update_own_profile(
+    profile_update: ProfileUpdate = Body(..., embed=True),
+    current_user: UserInDB = Depends(get_current_active_user),
+    profiles_repo: ProfilesRepository = Depends(get_repository(ProfilesRepository)),
+) -> ProfilePublic:
+    updated_profile = await profiles_repo.update_profile(profile_update=profile_update, requesting_user=current_user)
+
+    return updated_profile
+
+```
+
+We're simply calling the currently non-existent `update_profile` method and passing along whatever updates are needed along with the user that is being updated.
+
+Now on to the repo.
+
+```python:title=<span>db/repositories/profiles.py</span>
+# ...other code
+
+UPDATE_PROFILE_QUERY = """
+    UPDATE profiles
+    SET full_name    = :full_name,
+        phone_number = :phone_number,
+        bio          = :bio,
+        image        = :image
+    WHERE user_id = :user_id
+    RETURNING id, full_name, phone_number, bio, image, user_id, created_at, updated_at;
+"""
+
+
+class ProfilesRepository(BaseRepository):
+    # ...other code
+
+    async def update_profile(
+        self, 
+        *, 
+        profile_update: ProfileUpdate, 
+        requesting_user: UserInDB,
+    ) -> ProfileInDB:
+        profile = await self.get_profile_by_user_id(user_id=requesting_user.id)
+        update_params = profile.copy(update=profile_update.dict(exclude_unset=True))
+
+        updated_profile = await self.db.fetch_one(
+            query=UPDATE_PROFILE_QUERY,
+            values=update_params.dict(
+                exclude={"id", "created_at", "updated_at", "username", "email"},
+            ),
+        )
+
+        return ProfileInDB(**updated_profile)
+
+```
+
+Run the tests again and this time they should pass.
+
+## Wrapping Up and Resources
+
+This was the longest post so far, so readers who feel exhausted by this point should not feel bad. Our API is really taking shape, and we're ready to put the finishing touches on an MVP. In the next post, we'll ensure users own cleanings they create and refactor all of the associated routes and repository methods.
+
+- SQL Joins [lesson](https://sqlbolt.com/lesson/select_queries_with_joins) from SQL Bolt
+- Alembic migration [docs](https://alembic.sqlalchemy.org/en/latest/tutorial.html)
+- SQLAlchemy constraints [docs](https://docs.sqlalchemy.org/en/13/core/constraints.html)
+
+## Github Repo
+
+All code up to this point can be found here:
+
+- https://github.com/Jastor11/phresh-tutorial/tree/part-9-setting-up-user-profiles-in-fastapi
+
+> Special thanks to [James Cape](https://github.com/james-cape) and Erick Cavalie for correcting errors in the original code.

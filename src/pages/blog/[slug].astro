@@ -1,0 +1,138 @@
+---
+import PostLayout from "@/layouts/PostLayout.astro"
+
+import PrevNextPost from "@/components/Blog/OtherPosts/PrevNextPost.astro"
+import PostTagsListing from "@/components/Blog/Tags/PostTagsListing.astro"
+import PostCategory from "@/components/Blog/PostCategory/PostCategory.astro"
+import PostContentTitle from "@/components/Blog/PostTitle/PostTitle.astro"
+import PostContentDates from "@/components/Blog/PostTimestamps/PostContentDate.astro"
+import PostContentMainImage from "@/components/Blog/PostImage/PostImage.astro"
+
+import PostActions from "@/components/Blog/PostActions/PostActions"
+
+import PostSEO from "@/components/Head/PostSEO.astro"
+
+// MDX Components
+import Anchor from "@/components/MDX/Anchor.astro"
+import BlockQuote from "@/components/MDX/BlockQuote.astro"
+import Figure from "@/components/MDX/Figure.astro"
+import Pre from "@/components/MDX/Pre.astro"
+import H2 from "@/components/MDX/H2.astro"
+import H3 from "@/components/MDX/H3.astro"
+import H4 from "@/components/MDX/H4.astro"
+import H5 from "@/components/MDX/H5.astro"
+import H6 from "@/components/MDX/H6.astro"
+import Ol from "@/components/MDX/Ol.astro"
+import Ul from "@/components/MDX/Ul.astro"
+import Li from "@/components/MDX/Li.astro"
+import P from "@/components/MDX/P.astro"
+import Strong from "@/components/MDX/Strong.astro"
+import Table from "@/components/MDX/Table.astro"
+import TableD from "@/components/MDX/TableD.astro"
+
+import { slugify } from "@/utils/slugify"
+import { getPublishedBlogPosts } from "@/lib/blog-posts"
+
+import { cn } from "@/utils/styles"
+
+export async function getStaticPaths() {
+  const globbedMd = await Astro.glob("../../content/posts/**/*.{md,mdx}")
+
+  const posts = await getPublishedBlogPosts()
+
+  try {
+    const paths = posts.map((post) => {
+      const slug = slugify(post.slug)
+      let globbedPost: Record<string, any> | undefined = undefined
+      try {
+        globbedPost = globbedMd.find((md: any) => md?.frontmatter?.slug && slugify(md.frontmatter.slug) === slug)
+      } catch (e) {
+        console.error(e)
+      }
+
+      return {
+        params: { slug },
+        props: {
+          post,
+          globbedPost,
+        },
+      }
+    })
+
+    return paths
+  } catch (error) {
+    console.log(error)
+    return []
+  }
+}
+
+const props = Astro.props
+
+const { post, globbedPost } = props // as Props
+
+const { Content } = await post.render()
+
+const comboPost = {
+  ...post,
+  frontmatter: globbedPost?.frontmatter ?? {},
+  data: post.data,
+  // readingTime: globbedPost?.frontmatter?.readingTime,
+  // tableOfContents: globbedPost?.frontmatter?.tableOfContents,
+} as const
+
+const components = {
+  a: Anchor,
+  p: P,
+  h2: H2,
+  h3: H3,
+  h4: H4,
+  h5: H5,
+  h6: H6,
+  ul: Ul,
+  ol: Ol,
+  li: Li,
+  pre: Pre,
+  strong: Strong,
+  blockquote: BlockQuote,
+  table: Table,
+  td: TableD,
+  figure: Figure,
+} as const
+
+const postData = comboPost.data
+
+const maxWidthStyles = cn([
+  "w-full max-w-screen-95% sm:max-w-screen-90% md:max-w-screen-85% tablet:max-w-screen-80% xl:max-w-screen-75%",
+  "mx-auto",
+  //
+])
+
+/**
+ * NOTE: Commento has been discontinued
+ *
+ * Disabling comments until a decision has been made on what to migrate to
+ */
+---
+
+<PostLayout post={comboPost} title={comboPost.data.title}>
+  <PostSEO post={comboPost} globbedPost={globbedPost} slot="head" />
+
+  <section class={cn(maxWidthStyles, "pt-10")}>
+    <PostCategory category={comboPost.data.category} />
+    <PostContentTitle title={comboPost.data.title} />
+    <PostContentDates date={comboPost.data.date} dateModified={comboPost.data.dateModified} />
+    <PostContentMainImage category={comboPost.data.category} />
+  </section>
+
+  <Content components={components} />
+
+  <PostTagsListing tags={postData?.tags ?? []} />
+  <PrevNextPost prevPost={comboPost.meta.prevPost ?? undefined} nextPost={comboPost.meta.nextPost ?? undefined} />
+
+  <!-- <div class={maxWidthStyles}>
+    <div id="commento"></div>
+  </div> -->
+
+  <!-- <PostActions post={comboPost} client:load /> -->
+  <PostActions post={comboPost} client:only="react" />
+</PostLayout>

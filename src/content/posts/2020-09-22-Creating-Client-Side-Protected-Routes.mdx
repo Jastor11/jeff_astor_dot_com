@@ -1,0 +1,1012 @@
+---
+title: "Client-Side Protected Routes and User Registration"
+category: "Authentication"
+date: "09/22/2020"
+slug: "client-side-protected-routes-and-user-registration"
+published: "true"
+series: up-and-running-with-fastapi
+tags:
+  - javascript
+  - react
+  - course
+  - elastic ui
+  - styled components
+  - authentication
+  - redux
+  - axios
+  - hooks
+---
+
+import FastAPISeriesList from "@/components/MDX/series/FastAPI.astro"
+import CodesandboxDisplay from "@/components/MDX/custom/CodeSandbox.astro"
+
+Welcome to Part 16 of Up and Running with FastAPI. If you missed part 15, you can find it [here](/blog/managing-auth-state-with-redux).
+
+This series is focused on building a full-stack application with the FastAPI framework. The app allows users to post requests to have their residence cleaned, and other users can select a cleaning project for a given hourly rate.
+
+<FastAPISeriesList upTo={16} />
+
+In the previous post, we brought the `redux` and `react-redux` libraries into the mix for global state management. Doing so made it easy for us to handle authentication state on the client and ensure that users can authenticate against our FastAPI backend and stay logged in.
+
+We still haven't provided a registration mechanism for new users, nor have we protected routes from users who aren't currently authenticated. Let's handle that in this post. On top of that, we'll ensure that each user has a personalized profile page to view their user stats.
+
+## Protecting Routes
+
+Whenever we sign into our application we're redirected to the profile page - which is nice! However, if we sign out, we're left on that page. That's going to cause problems if we don't handle it, so let's begin there.
+
+Go ahead and create a new component called `ProtectedRoute.js`.
+
+```bash
+mkdir src/components/ProtectedRoute
+touch src/components/ProtectedRoute/ProtectedRoute.js
+```
+
+Add the following code to that new component:
+
+```jsx:title=<span>ProtectedRoute.js</span>
+import React from "react"
+import { LoginPage } from "../../components"
+import { connect } from "react-redux"
+
+function ProtectedRoute({ user, userLoaded, isAuthenticated, component: Component, ...props }) {
+  const isAuthed = isAuthenticated && Boolean(user?.email)
+
+  if (!isAuthed) return <LoginPage />
+
+  return <Component {...props} />
+}
+
+export default connect((state) => ({
+  user: state.auth.user,
+  isAuthenticated: state.auth.isAuthenticated,
+  userLoaded: state.auth.userLoaded
+}))(ProtectedRoute)
+
+```
+
+This component connects to our redux store, checks to make sure that we have a currently authenticated user (by casting `user.email` to a boolean), and renders the `LoginPage` component if that's not the case. If all is well, it renders whatever component is passed in along with the associated props.
+
+After we export the component,
+
+```jsx:title=<span>components/index.js</span>
+export { default as App } from "./App/App"
+export { default as Carousel } from "./Carousel/Carousel"
+export { default as CarouselTitle } from "./CarouselTitle/CarouselTitle"
+export { default as LandingPage } from "./LandingPage/LandingPage"
+export { default as Layout } from "./Layout/Layout"
+export { default as LoginForm } from "./LoginForm/LoginForm"
+export { default as LoginPage } from "./LoginPage/LoginPage"
+export { default as Navbar } from "./Navbar/Navbar"
+export { default as NotFoundPage } from "./NotFoundPage/NotFoundPage"
+export { default as ProfilePage } from "./ProfilePage/ProfilePage"
+export { default as ProtectedRoute } from "./ProtectedRoute/ProtectedRoute"
+export { default as RegistrationForm } from "./RegistrationForm/RegistrationForm"
+export { default as RegistrationPage } from "./RegistrationPage/RegistrationPage"
+
+```
+
+We can use it in our routes like so:
+
+```jsx:title=<span>components/App.js</span>
+import React from "react"
+import { BrowserRouter, Routes, Route } from "react-router-dom"
+import {
+  LandingPage,
+  Layout,
+  LoginPage,
+  NotFoundPage,
+  ProfilePage,
+  ProtectedRoute,  // highlight-line
+  RegistrationPage
+} from "../../components"
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/profile" element={<ProtectedRoute component={ProfilePage} />} />  // highlight-line
+          <Route path="/registration" element={<RegistrationPage />} />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
+  )
+}
+
+```
+
+Try navigating to the `/profile` route without an authenticated user. See how we're shown the `LoginPage` component instead of the `ProfilePage` component? That's how our `ProtectedRoute` in action.
+
+It's weird though. Sorta seems like we actually navigated to the `LoginPage` as there's no indication in the UI that we weren't allowed to access that page. Let's notify the user as to why they're seeing this page.
+
+This is the perfect situation for the `EuiToast` component! Well, we're actually going to leverage the `EuiGlobalToastList` component that stores a list of toasts. They're super useful, so check out the documentation [here](https://elastic.github.io/eui/#/display/toast).
+
+```jsx:title=<span>ProtectedRoute.js</span>
+import React from "react"
+import { EuiGlobalToastList, EuiLoadingSpinner } from "@elastic/eui"
+import { LoginPage } from "../../components"
+import { connect } from "react-redux"
+
+function ProtectedRoute({
+  user,
+  userLoaded,
+  isAuthenticated,
+  component: Component,
+  redirectTitle = `Access Denied`,
+  redirectMessage = `Authenticated users only. Login here or create a new account to view that page.`,
+  ...props
+}) {
+  const [toasts, setToasts] = React.useState([
+    {
+      id: "auth-redirect-toast",
+      title: redirectTitle,
+      color: "warning",
+      iconType: "alert",
+      toastLifeTimeMs: 15000,
+      text: <p>{redirectMessage}</p>
+    }
+  ])
+  if (!userLoaded) return <EuiLoadingSpinner size="xl" />
+  const isAuthed = isAuthenticated && Boolean(user?.email)
+
+  if (!isAuthed) {
+    return (
+      <>
+        <LoginPage />
+        <EuiGlobalToastList
+          toasts={toasts}
+          dismissToast={() => setToasts([])}
+          toastLifeTimeMs={15000}
+          side="right"
+          className="auth-toast-list"
+        />
+      </>
+    )
+  }
+
+  return <Component {...props} />
+}
+
+export default connect((state) => ({
+  user: state.auth.user,
+  isAuthenticated: state.auth.isAuthenticated,
+  userLoaded: state.auth.userLoaded
+}))(ProtectedRoute)
+
+```
+
+Now unauthenticated users that navigate to the `/profile` page will be shown a login screen and have a nice message panel in the bottom right that explains why they're seeing what they're seeing. If the user hasn't been loaded into redux yet, we show an `EuiLoadingSpinner` component for a smoother user experience.
+
+<CodesandboxDisplay
+  codesandboxLink={
+    "https://codesandbox.io/s/phresh-frontend-part-4-protecting-client-side-routes-8h0ep?file=/src/redux/auth.js"
+  }
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-4-protecting-client-side-routes-8h0ep?codemirror=1&fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-4-protecting-client-side-routes",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+We're going to need to return back to this component later on, but let's move on for now.
+
+## Registering Users
+
+At the moment we have a nice `RegistrationForm` component that doesn't actually submit anything to our FastAPI backend. We're going to need to replace our dummy `registerUser` function with a `redux` action creator, and make sure our reducer is set up to handle `registration` flow as well.
+
+Let's start on the `redux` side of things in the `redux/auth.js` file.
+
+```jsx:title=<span>redux/auth.js</span>
+// ...other code
+
+export const REQUEST_USER_SIGN_UP = "@@auth/REQUEST_USER_SIGN_UP"
+export const REQUEST_USER_SIGN_UP_SUCCESS = "@@auth/REQUEST_USER_SIGN_UP_SUCCESS"
+export const REQUEST_USER_SIGN_UP_FAILURE = "@@auth/REQUEST_USER_SIGN_UP_FAILURE"
+
+// ...other code
+
+export default function authReducer(state = initialState.auth, action = {}) {
+  switch (action.type) {
+    // ...other code
+
+    case REQUEST_USER_SIGN_UP:
+      return {
+        ...state,
+        isLoading: true,
+      }
+    case REQUEST_USER_SIGN_UP_SUCCESS:
+      return {
+        ...state,
+        isLoading: false,
+        error: null
+      }
+    case REQUEST_USER_SIGN_UP_FAILURE:
+      return {
+        ...state,
+        isLoading: false,
+        isAuthenticated: false,
+        error: action.error
+      }
+
+    // ...other code
+
+    default:
+      return state
+  }
+}
+
+// ...other code
+
+Actions.registerNewUser = ({ username, email, password }) => {
+  return async (dispatch) => {
+    dispatch({ type: REQUEST_USER_SIGN_UP })
+
+    try {
+      const res = await axios({
+        method: `POST`,
+        url: `http://localhost:8000/api/users/`,
+        data: { new_user: { username, email, password } },
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      const access_token = res?.data?.access_token?.access_token
+      localStorage.setItem("access_token", access_token)
+      dispatch({ type: REQUEST_USER_SIGN_UP_SUCCESS })
+
+      return dispatch(Actions.fetchUserFromToken(access_token))
+    } catch (error) {
+      console.log(error)
+      dispatch({ type: REQUEST_USER_SIGN_UP_FAILURE, error })
+    }
+  }
+}
+
+
+```
+
+Alright. Quite a few things happening here.
+
+First, we're creating constants to represent the three states that could results from a user attempting to sign up. We then use those constants in our reducer to indicate how the shape of our auth data in the redux store should look under each of the defined conditions. Finally, we define a new action creator called `registerNewUser` that returns an `async` function.
+
+The function begins by dispatching the initial request action - `REQUEST_USER_SIGN_UP` - and then makes an api request to the proper endpoint. If the request is successful, we dispatch the `REQUEST_USER_SIGN_UP_SUCCESS` action, grab/stash the access token from the response, and pass it to our `fetchUserFromToken` action creator. If anything goes wrong, we catch the error and dispatch the `REQUEST_USER_SIGN_UP_FAILURE`.
+
+> Sidenote: I realized as I started writing the code for this post that having the token available at `res?.data?.access_token?.access_token` is pretty silly. It will probably make sense to go into the backend and refactor that later on. We could also just take the user data returned from creating the user and update the store, but I'd rather stay consistent in fetching the user from the `access_token`.
+
+This pattern follows closely in line with how we allowed users to log in, so it shouldn't seem too out of place.
+
+Let connect our `RegistrationForm` to the redux store and use our new action creator.
+
+```jsx:title=<span>RegistrationForm.js</span>
+import React from "react"
+import { connect } from "react-redux"
+import { Actions as authActions, FETCHING_USER_FROM_TOKEN_SUCCESS } from "../../redux/auth"
+import { useNavigate } from "react-router-dom"
+// ...other code
+
+function RegistrationForm({ authError, user, isLoading, isAuthenticated, registerUser }) {
+  const [form, setForm] = React.useState({
+    username: "",
+    email: "",
+    password: "",
+    passwordConfirm: ""
+  })
+  const [agreedToTerms, setAgreedToTerms] = React.useState(false)
+  const [errors, setErrors] = React.useState({})
+  const navigate = useNavigate()
+
+  // if the user is already authenticated, redirect them to the "/profile" page
+  React.useEffect(() => {
+    if (user?.email && isAuthenticated) {
+      navigate("/profile")
+    }
+  }, [user, navigate, isAuthenticated])
+
+  // ...other code
+
+  const handleSubmit = async (e) => {
+    // ...other code
+
+    const action = await registerUser({
+      username: form.username,
+      email: form.email,
+      password: form.password
+    })
+    // reset password inputs in case registration is unsuccessful
+    if (action?.type !== FETCHING_USER_FROM_TOKEN_SUCCESS) {
+      setForm((form) => ({ ...form, password: "", passwordConfirm: "" }))
+    }
+  }
+
+  return (
+    // ...other code
+    <EuiButton type="submit" isLoading={isLoading} fill>
+      Sign Up
+    </EuiButton>
+    // ...other code
+  )
+}
+
+export default connect(
+  (state) => ({
+    authError: state.auth.error,
+    isLoading: state.auth.isLoading,
+    isAuthenticated: state.auth.isAuthenticated,
+    user: state.auth.user
+  }),
+  {
+    registerUser: authActions.registerNewUser
+  }
+)(RegistrationForm)
+
+```
+
+Ok, this looks pretty similar. We connect the component to our `redux` store and map the properties of the `auth` slice to the `RegistrationForm`. We also map the `authActions.registerNewUser` method to the component props using the Object-notation shorthand. If the user signs up successfully, they should immediately be redirected to the `/profile` page. Otherwise, we reset the password fields have them try again.
+
+Try signing up a fresh user and check out our new registration flow in action.
+
+<CodesandboxDisplay
+  codesandboxLink={
+    "https://codesandbox.io/s/phresh-frontend-part-4-registering-new-users-33wlt?file=/src/components/RegistrationForm/RegistrationForm.js"
+  }
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-4-registering-new-users-33wlt?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-4-registering-new-users",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+Not bad! But there's definitely some improvements that can be made here.
+
+First of all, we're not handling unsuccessful registrations at all and we're starting to repeat ourselves in the `redux/auth.js` file. Before we do anything else, let's address some of those issues.
+
+## Refactoring API requests
+
+Observant readers will have noticed that we're following a particular pattern on every request to our API. We issue the initial request, then handle either a successful response or an unsuccessful one. We have actions for each case, and chances are we'll be replicating this process again and again.
+
+Instead of continuing to write each new request by hand, let's write a custom client to handle that for us.
+
+Create a new file in the `services` directory titled `apiClient.js` and a new file in the `utils` directory called `urls.js`.
+
+```bash
+touch src/services/apiClient.js
+touch src/utils/urls.js
+```
+
+Our `utils/urls.js` file will be responsible for standardizing the url formats used across our app, so that's a good place to start.
+
+Open up the file and add the following:
+
+```jsx:title=<span>utils/urls.js</span>
+/**
+ * Formats API request URLs
+ *
+ * @param {String} base - url string representing api endpoint without query params
+ * @param {Object} params - query params to format and append to end of url
+ */
+export const formatURLWithQueryParams = (base, params) => {
+  if (!params || Object.keys(params)?.length === 0) return base
+
+  const query = Object.entries(params)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join("&")
+
+  return `${base}?${query}`
+}
+
+/**
+ *  Format API request paths
+ *
+ * @param {String} path - relative path to api endpoint
+ */
+export const formatAPIPath = (path) => {
+  let adjustedPath = path
+
+  // bookend path with forward slashes
+  if (adjustedPath.charAt(0) !== "/") {
+    adjustedPath = "/" + adjustedPath
+  }
+  if (adjustedPath.charAt(adjustedPath.length - 1) !== "/") {
+    adjustedPath = adjustedPath + "/"
+  }
+
+  return adjustedPath
+}
+
+/**
+ * Formats API request URLs
+ *
+ * @param {String} url - url string representing relative path to api endpoint
+ * @param {Object} params - query params to format at end of url
+ */
+export const formatURL = (url, params) => {
+  const endpointPath = formatAPIPath(url)
+
+  const baseUrl =
+    process.env.NODE_ENV === "production"
+      ? process.env.REMOVE_SERVER_URL
+      : "http://localhost:8000/api"
+
+  const fullURL = `${baseUrl}${endpointPath}`
+
+  return formatURLWithQueryParams(fullURL, params)
+}
+
+```
+
+Event though it looks like there's a lot going on here, the end result isn't that complicated. Let's step through each function starting from the last one: `formatURL`. The function takes in two arguments, `url` and `params`, and uses the `formatAPIPath` and `formatURLWithQueryParams` functions to compose a full path to an API endpoint.
+
+Let's see an example of how it would work:
+
+```jsx
+const pathToEndpoint = formatURL(`/search/cleanings`, { searchTerm: "house", price: 9.99 })
+console.log(pathToEndpoint)
+// http://localhost:8000/api/search/cleanings/?searchTerm=house&price=9.99
+```
+
+Besides removing the need for us to manually construct the full URL each time we call our FastAPI backend, this function standardizes the format of URLs in both production and dev environments. When we deploy our application, we'll simply add the `REMOTE_SERVER_URL` environment variable and our code should work as is.
+
+The `formatAPIPath` function just ensures that our relative path has a forward slash at the beginning and the end. Our `formatURLWithQueryParams` takes in an object representing query params passed to the endpoint, and formats them as encoded URI components. If none are passed or the object is empty, it returns only the base path.
+
+Now, let's construct the `apiClient` service that will employ these utils.
+
+```jsx:title=<span>services/apiClient.js</span>
+import axios from "axios"
+import { formatURL } from "../utils/urls"
+
+const getClient = (token = null) => {
+  const defaultOptions = {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: token ? `Bearer ${token}` : ""
+    }
+  }
+
+  return {
+    get: (url, data, options = {}) => axios.get(url, { ...defaultOptions, ...options }),
+    post: (url, data, options = {}) => axios.post(url, data, { ...defaultOptions, ...options }),
+    put: (url, data, options = {}) => axios.put(url, data, { ...defaultOptions, ...options }),
+    delete: (url, data, options = {}) => axios.delete(url, { ...defaultOptions, ...options })
+  }
+}
+
+/**
+ *
+ * @param {String} url - relative api endpoint url
+ * @param {String} method - "GET", "POST", "PUT", "DELETE"
+ * @param {Object} types - object with three keys representing the different action types: REQUEST, SUCCESS, FAILURE
+ * @param {Object} options - object with potential data and query params
+ * @param {Function} onSuccess - callback to run with the returned data, if any
+ * @param {Function} onFailure - callback to run with the returned error, if any
+ */
+const apiClient = ({
+  url,
+  method,
+  types: { REQUEST, SUCCESS, FAILURE },
+  options: { data, params },
+  onSuccess = (res) => ({ type: res.type, success: true, status: res.status, data: res.data }),
+  onFailure = (res) => ({ type: res.type, success: false, status: res.status, error: res.error })
+}) => {
+  return async (dispatch) => {
+    const token = localStorage.getItem("access_token")
+    const client = getClient(token)
+
+    dispatch({ type: REQUEST })
+    const urlPath = formatURL(url, params)
+
+    try {
+      const res = await client[method.toLowerCase()](urlPath, data)
+
+      dispatch({ type: SUCCESS, data: res.data })
+
+      return onSuccess({ type: SUCCESS, ...res })
+    } catch (error) {
+      console.log(error)
+      dispatch({
+        type: FAILURE,
+        error: error?.response?.data ? error.response.data : error
+      })
+
+      return onFailure({ type: FAILURE, status: error.status, error: error.response })
+    }
+  }
+}
+
+export default apiClient
+
+```
+
+Now we're talking. The `getClient` function takes in an optional token and constructs the proper request headers. Then it returns a simple object with `GET`, `POST`, `PUT`, and `DELETE` methods mapped to the appropriate `axios` api request method.
+
+Our `apiClient` function is where all the magic happens. Before we outline each of the parameters, let's see how we might actually use this function in practice. If we were to rewrite our `registerNewUser` action creator to use our new client, here's how it might look:
+
+```jsx
+Actions.registerNewUser = ({ username, email, password }) => {
+  return apiClient({
+    url: `/users/`,
+    method: `POST`,
+    types: {
+      REQUEST: REQUEST_USER_SIGN_UP,
+      SUCCESS: REQUEST_USER_SIGN_UP_SUCCESS,
+      FAILURE: REQUEST_USER_SIGN_UP_FAILURE,
+    },
+    options: {
+      data: { new_user: { username, email, password } },
+      params: {},
+    },
+  })
+}
+```
+
+Wow! That's so simple. All we need to do is pass an object to `apiClient` with keys for:
+
+- **url** - the relative path to the api endpoint
+- **method** - the HTTP method used at this endpoint
+- **types** - the three different action types we would dispatch at different stages of the request
+- **options** - an object containing data used in `POST` requests and any query params
+- **onSuccess** - a callback to return if the request succeeds
+- **onFailure** - a callback to return if the request fails
+
+Behind the scenes, the `apiClient` simply returns an async function that accepts the `dispatch` method as its only argument. That function grabs the user's access token from local storage (if it exists), creates a client with that token, and then dispatches the initial `REQUEST` action to kick off the async flow.
+
+The full api endpiont is then constructed using the `formatURL` util we defined a minute ago and we make the request inside a `try/catch` block. If the request is successful, we dispatch the `SUCCESS` action and return the `onSuccess` callback. In the case of an error, we dispatch the `FAILURE` action and return the `onFailure` callback.
+
+Let's actually go in and refactor the `registerNewUser` action creator for real this time:
+
+```jsx:title=<span>redux/auth.js</span>
+// ...other code
+
+Actions.registerNewUser = ({ username, email, password }) => {
+  return (dispatch) =>
+    dispatch(
+      apiClient({
+        url: `/users/`,
+        method: `POST`,
+        types: {
+          REQUEST: REQUEST_USER_SIGN_UP,
+          SUCCESS: REQUEST_USER_SIGN_UP_SUCCESS,
+          FAILURE: REQUEST_USER_SIGN_UP_FAILURE
+        },
+        options: {
+          data: { new_user: { username, email, password } },
+          params: {}
+        },
+        onSuccess: (res) => {
+          // stash the access_token our server returns
+          const access_token = res?.data?.access_token?.access_token
+          localStorage.setItem("access_token", access_token)
+
+          return dispatch(Actions.fetchUserFromToken(access_token))
+        },
+        onFailure: (res) => ({ type: res.type, success: false, status: res.status, error: res.error })
+      })
+    )
+}
+
+```
+
+A couple new wrinkles. We're actually calling the dispatch function on the `apiClient` so that we have access to it in the `onSuccess` handler. This allows us to dispatch any additional actions in the `onSuccess` callback, making it easy to ask for the user's profile after they've successfully registered.
+
+<CodesandboxDisplay
+  codesandboxLink={"https://codesandbox.io/s/phresh-frontend-part-4-custom-api-client-tpzoc?file=/src/redux/auth.js"}
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-4-custom-api-client-tpzoc?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-4-custom-api-client",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+With that out of the way, we can now do some proper error handling in our `RegistrationForm` component.
+
+## Handling Signups Using Duplicate Usernames and Emails
+
+So what situations might we expect user registration to be unsuccessful? Well, besides a network issue, what happens when the user attempts to sign up with an email or username that is already taken?
+
+Let's find out!
+
+Try signing up with these credentials:
+
+- **email**: me@you.com
+- **username**: person
+- **password**: whateveryouwant
+
+If everything goes well, we should be redirected to the profile page and have our user credentials displayed in the popover. Sign out and try registering with the same credentials.
+
+Uh oh! That's no good. The request fails, but there's no feedback for the user. Inspecting the redux state tree tells us a bit more. The `error` attribute is currently holding an object with a `detail` key stating: `"That email is already taken. Login with that email or register with another one."`
+
+It's nice that we can see that, but we can't leave users completely unaware of their errors. Try changing the email to something unused and see what error response is returned. We should expect to see "That username is already taken. Please try another one."
+
+Here's where things get extra interesting. Enter in an email using this format: `coder@`. Our email validation on the client only looks for an `@` symbol, so this should be valid. Provide an unused username and click `Sign Up`. The form submits, but it isn't successful. When we inspect why, we see that the `detail` attribute on the `error` object is an array of information about why the request was invalid. Remember that `pydantic` is validating the body of the request on the FastAPI side. When the request body is invalid, we'll get a 422 response code and an array of error objects detailing the issues with each field.
+
+In our case, the object has a `loc` array, a `msg`, and a `type`. While each of these values is useful in determining what went wrong, they aren't particularly user facing, so it makes sense to provide an error interface for handling responses from the FastAPI server.
+
+Let's go ahead and create another file in the `utils` directory called `errors.js`.
+
+```bash
+touch src/utils/errors.js
+```
+
+This file will be responsible for parsing the error message sent back by our FastAPI server and ensuring that we have a standardized format to display on the client side.
+
+```jsx:title=<span>utils/errors.js</span>
+export const errorFieldToMessageMapping = {
+  email: "Please enter a valid email.",
+  username: "Please enter a username consisting of only letters, numbers, underscores, and dashes.",
+  password: "Please choose a password with at least 7 characters."
+}
+
+export const parseErrorDetail = (errorDetail) => {
+  let errorMessage = "Something went wrong. Contact support."
+
+  if (Array.isArray(errorDetail?.loc)) {
+    // error with a path parameter and probably isn't a client issue
+    if (errorDetail.loc[0] === "path") return errorMessage
+    // error with a query parameter and also is probably not the client's fault
+    if (errorDetail.loc[0] === "query") return errorMessage
+    // because we use FastAPI's `Body(..., embed)` for all post requests
+    // this should be an array of length 3, with shape: ["body", "new_user", "email"]
+    if (errorDetail.loc[0] === "body") {
+      const invalidField = errorDetail.loc[2]
+
+      if (errorFieldToMessageMapping[invalidField]) {
+        errorMessage = errorFieldToMessageMapping[invalidField]
+      } else if (errorDetail?.msg) {
+        errorMessage = errorDetail.msg
+      }
+    }
+  }
+
+  return errorMessage
+}
+
+export const extractErrorMessages = (error) => {
+  const errorList = []
+
+  // if we just pass in a string, use that
+  if (typeof error === "string") errorList.push(error)
+
+  // in the case that we raised the error ourselves with FastAPI's HTTPException,
+  // just use the message passed from the backend.
+  if (typeof error?.detail === "string") errorList.push(error.detail)
+
+  // in the case that there's a validation error in the request body, path parameters, or query parameters
+  // we'll get an array of error issues here:
+  if (Array.isArray(error?.detail)) {
+    error.detail.forEach((errorDetail) => {
+      const errorMessage = parseErrorDetail(errorDetail)
+      errorList.push(errorMessage)
+    })
+  }
+
+  return errorList
+}
+
+```
+
+Let's be clear here - this isn't the GREATEST code we've ever written. It's a quick and dirty error parser that is taking the place of writing a custom error handler in our FastAPI backend. We're saving that for a future refactor, so don't stress out too much if this doesn't feel like a clean solution to our problem. It's not meant to be.
+
+In the `extractErrorMessages` function we check to see if the error sent back from the server is already a string. If it is, we simply use that error. If we get an array, it's likely the result of a `pydantic` validation error. We pass each validation error to our `parseErrorDetail` function and handle each type appropriately. In the case of a `path` or `query` error, we've likely incorrectly formatted our API call and will want to handle that ourselves. However, when there's an error validating a POST body field, we'll map that field to the appropriate error message or return a default message.
+
+Now we'll do a quick refactor in our `RegistrationForm` component and display whatever error message is necessary.
+
+```jsx:title=<span>RegistrationForm.js</span>
+// ...other code
+import { extractErrorMessages } from "../../utils/errors"
+
+function RegistrationForm({ authError, user, isLoading, isAuthenticated, registerUser }) {
+  const [form, setForm] = React.useState({
+    username: "",
+    email: "",
+    password: "",
+    passwordConfirm: ""
+  })
+  const [agreedToTerms, setAgreedToTerms] = React.useState(false)
+  const [errors, setErrors] = React.useState({})
+  const [hasSubmitted, setHasSubmitted] = React.useState(false) // highlight-line
+  const navigate = useNavigate()
+  const authErrorList = extractErrorMessages(authError)  // highlight-line
+
+  // ...other code
+
+
+  const handleSubmit = async (e) => {
+    // ...other code
+
+    setHasSubmitted(true)
+    const action = await registerUser({
+      username: form.username,
+      email: form.email,
+      password: form.password
+    })
+    if (action?.type !== FETCHING_USER_FROM_TOKEN_SUCCESS) {
+      setForm((form) => ({ ...form, password: "", passwordConfirm: "" }))
+    }
+  }
+
+  const getFormErrors = () => {
+    const formErrors = []
+
+    if (errors.form) {
+      formErrors.push(errors.form)
+    }
+
+    if (hasSubmitted && authErrorList.length) {
+      return formErrors.concat(authErrorList)
+    }
+
+    return formErrors
+  }
+
+  return (
+    <RegistrationFormWrapper>
+      <EuiForm
+        component="form"
+        onSubmit={handleSubmit}
+        isInvalid={Boolean(getFormErrors().length)}
+        error={getFormErrors()}
+      >
+        {/* ...other code */}
+      </EuiForm>
+
+      {/* ...other code */}
+
+    </RegistrationFormWrapper>
+  )
+}
+
+export default connect(
+  (state) => ({
+    authError: state.auth.error,
+    isLoading: state.auth.isLoading,
+    isAuthenticated: state.auth.isAuthenticated,
+    user: state.auth.user
+  }),
+  {
+    registerUser: authActions.registerNewUser
+  }
+)(RegistrationForm)
+
+```
+
+We start by importing the `extractErrorMessages` messages function and calling it inside our component with the `authError` prop mapped from our `redux` state tree. We also create a `hasSubmitted` flag with `React.useState` that will indicate whether or not our user should be shown any errors stored with `redux`. Otherwise, they would see errors as soon as they loaded up any authentication form. That doesn't make for a good user experience. We also ensure that when the user clicks submit, we set the `hasSubmitted` flag to `true`.
+
+We create a new `getFormErrors` function that replicates the same functionality we saw with the `LoginForm` component. All that's left is to update the `EuiForm` component to be invalid when the array returned from `getFormErrors` is not empty and then to render those errors after the user has submitted.
+
+<CodesandboxDisplay
+  codesandboxLink={
+    "https://codesandbox.io/s/phresh-frontend-part-4-handling-registration-errors-hb0fe?file=/src/components/RegistrationForm/RegistrationForm.js"
+  }
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-4-handling-registration-errors-hb0fe?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-4-handling-registration-errors",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+Let's try it out one more time. We enter `person@me` and are shown a `Please enter a valid email.` error. We use an email that is already taken, and are shown a `That email is already taken. Login with that email or register with another one.` message. And finally, we try a taken username and are shown `That username is already taken. Please try another one.`.
+
+Fantastic.
+
+## Building Out A Profile Page Skeleton
+
+Alright, now that our authentication flow is starting to come together, let's spruce up our profile page to give the logged in user something to look at.
+
+```jsx:title=<span>ProfilePage.js</span>
+import React from "react"
+import { connect } from "react-redux"
+import {
+  EuiAvatar,
+  EuiHorizontalRule,
+  EuiIcon,
+  EuiPage,
+  EuiPageBody,
+  EuiPageContent,
+  EuiPageContentBody,
+  EuiPageHeader,
+  EuiPageHeaderSection,
+  EuiTitle,
+  EuiText
+} from "@elastic/eui"
+import moment from "moment"
+import styled from "styled-components"
+
+const StyledEuiPage = styled(EuiPage)`
+  flex: 1;
+`
+const StyledEuiPageHeader = styled(EuiPageHeader)`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 2rem;
+
+  & h1 {
+    font-size: 3.5rem;
+  }
+`
+const StyledEuiPageContentBody = styled(EuiPageContentBody)`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  & h2 {
+    margin-bottom: 1rem;
+  }
+`
+
+function ProfilePage({ user }) {
+  return (
+    <StyledEuiPage>
+      <EuiPageBody component="section">
+        <StyledEuiPageHeader>
+          <EuiPageHeaderSection>
+            <EuiTitle size="l">
+              <h1>Profile</h1>
+            </EuiTitle>
+          </EuiPageHeaderSection>
+        </StyledEuiPageHeader>
+        <EuiPageContent verticalPosition="center" horizontalPosition="center">
+          <StyledEuiPageContentBody>
+            <EuiAvatar
+              size="xl"
+              name={user.profile.full_name || user.username || "Anonymous"}
+              initialsLength={2}
+              imageUrl={user.profile.image}
+            />
+            <EuiTitle size="l">
+              <h2>@{user.username}</h2>
+            </EuiTitle>
+            <EuiText>
+              <p>
+                <EuiIcon type="email" /> {user.email}
+              </p>
+              <p>
+                <EuiIcon type="clock" /> member since {moment(user.created_at).format("MM-DD-YYYY")}
+              </p>
+              <p>
+                <EuiIcon type="alert" />{" "}
+                {user.profile.full_name ? user.profile.full_name : "Full name not specified"}
+              </p>
+              <p>
+                <EuiIcon type="number" />{" "}
+                {user.profile.phone_number ? user.profile.phone_number : "No phone number added"}
+              </p>
+              <EuiHorizontalRule />
+              <p>
+                <EuiIcon type="quote" />{" "}
+                {user.profile.bio ? user.profile.bio : "This user hasn't written a bio yet"}
+              </p>
+            </EuiText>
+          </StyledEuiPageContentBody>
+        </EuiPageContent>
+      </EuiPageBody>
+    </StyledEuiPage>
+  )
+}
+
+export default connect((state) => ({ user: state.auth.user }))(ProfilePage)
+
+```
+
+Simple enough. We connect the `ProfilePage` component to `redux` and map the `user` to component props. Then, we add a card with the user's avatar (with a default `name` prop set to the user's `full_name` or `username`) and add some relevant profile info. It also makes sense to go in and use the same defaults for the `EuiAvatar` in the `Navbar` component for consistency.
+
+Since we'll want to make a minor adjustment to the navbar anyway, let's also head in there and adjust the `handleLogout` function as well. We'll do this to wrap up the last piece of our basic authentication flow. When the user signs out, we'll redirect them to the landing page instead of leaving them on the page they're currently on. This way, they won't see that `Access Denied` toast that pops up for trying to access the `/profile` page when they've just signed out.
+
+```jsx:title=<span>Navbar.js</span>
+// ...other code
+import { Link, useNavigate } from "react-router-dom"
+// ...other cocde
+
+function Navbar({ user, logUserOut, ...props }) {
+  const [avatarMenuOpen, setAvatarMenuOpen] = React.useState(false)
+  const navigate = useNavigate() // highlight-line
+
+  const toggleAvatarMenu = () => setAvatarMenuOpen(!avatarMenuOpen)
+
+  const closeAvatarMenu = () => setAvatarMenuOpen(false)
+
+  const handleLogout = () => {
+    closeAvatarMenu()
+    logUserOut()
+    navigate("/") // highlight-line
+  }
+
+  const avatarButton = (
+    <EuiHeaderSectionItemButton
+      aria-label="User avatar"
+      onClick={() => user?.profile && toggleAvatarMenu()}
+    >
+      {user?.profile ? (
+        <EuiAvatar
+          size="l"
+          name={user.profile.full_name || user.username || "Anonymous"}  // highlight-line
+          initialsLength={2}
+          imageUrl={user.profile.image}
+        />
+      ) : (
+        <Link to="/login">
+          <EuiAvatar size="l" color="#1E90FF" name="user" imageUrl={loginIcon} />
+        </Link>
+      )}
+    </EuiHeaderSectionItemButton>
+  )
+
+  // ...other code
+
+  const renderAvatarMenu = () => {
+    if (!user?.profile) return null
+
+    return (
+      <AvatarMenu>
+        <EuiAvatar
+          size="xl"
+          name={user.profile.full_name || user.username || "Anonymous"} // highlight-line
+          initialsLength={2}
+          imageUrl={user.profile.image}
+        />
+        <EuiFlexGroup direction="column" className="avatar-actions">
+          {/* ...other code */}
+        </EuiFlexGroup>
+      </AvatarMenu>
+    )
+  }
+
+  return (
+    <EuiHeader style={props.style || {}}>
+      {/* ...other code */}
+    </EuiHeader>
+  )
+}
+
+export default connect((state) => ({ user: state.auth.user }), {
+  logUserOut: authActions.logUserOut
+})(Navbar)
+
+```
+
+We've ensured that whenever the user clicks the `log out` button, they're signed out properly and redirected to the landing page. This makes for a better user experience anyway, so it only seems right. We also add the user's username as a fallback for a missing profile pic in all sections.
+
+<CodesandboxDisplay
+  codesandboxLink={
+    "https://codesandbox.io/s/phresh-frontend-part-4-profile-page-jfct3?file=/src/components/Navbar/Navbar.js"
+  }
+  codesandboxProps={{
+    src: "https://codesandbox.io/embed/phresh-frontend-part-4-profile-page-jfct3?fontsize=14&hidenavigation=1&theme=dark",
+    style: "width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;",
+    title: "phresh-frontend-part-4-profile-page",
+    allow:
+      "accelerometer; camera; encrypted-media; geolocation; gyroscope; microphone; midi; payment; usb; xr-spatial-tracking",
+    sandbox: "allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts",
+  }}
+></CodesandboxDisplay>
+
+And just like that, we're done.
+
+## Wrapping Up and Resources
+
+This concludes the set of introductory posts in the building of our front-end for the Phresh application. At the moment, we're working with a pretty solid base. We've implemented a registration and login system using `redux` and `axios`, baked in routing with `react-router`, and styled a few pages with `elastic-ui` and `styled-components`. On top of that, we've brought in a few fancy animations with `framer-motion`.
+
+We're now ready to start letting users create posts and interact with our site. For now, we'll end things with a few resources referenced in this article.
+
+- Elastic UI toast [docs](https://elastic.github.io/eui/#/display/toast)
+- Elastic UI horizontal rule [docs](https://elastic.github.io/eui/#/layout/horizontal-rule)
+- Elastic UI avatar [docs](https://elastic.github.io/eui/#/display/avatar)
+- React Router DOM [page](https://reacttraining.com/blog/react-router-v6-pre/)
+- Framer Motion [docs](https://www.framer.com/motion/)
+- Styled Components [docs](https://styled-components.com/docs)
+- Axios [package](https://www.npmjs.com/package/axios)

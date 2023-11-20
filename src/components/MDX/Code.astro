@@ -1,0 +1,21 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"code"> & {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  "w-full",
+  className,
+  //
+])
+---
+
+<code class={elementClassnames} {...props}>
+  <slot />
+</code>

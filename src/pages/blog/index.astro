@@ -1,0 +1,28 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import BlogPosts from "@/components/Blog/BlogPosts/BlogPosts"
+import StandardAppSeo from "@/components/Head/StandardAppSeo.astro"
+
+import {
+  getPublishedBlogPosts,
+  extractUniqueCategoriesFromBlogPosts,
+  extractUniqueTagsFromBlogPosts,
+  extractUniqueSeriesFromBlogPosts,
+} from "@/lib/blog-posts"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const posts = await getPublishedBlogPosts()
+const categories = extractUniqueCategoriesFromBlogPosts(posts)
+const tags = extractUniqueTagsFromBlogPosts(posts)
+const serieses = extractUniqueSeriesFromBlogPosts(posts)
+---
+
+<AppLayout title="Blog Posts" isLanding={false}>
+  <StandardAppSeo slot="head" />
+  <BlogPosts client:load posts={posts} categories={categories} tags={tags} serieses={serieses} />
+</AppLayout>

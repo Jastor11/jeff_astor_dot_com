@@ -1,0 +1,12 @@
+---
+type Props = {
+  dataToken?: string
+  beamAnalyticsSrc?: string
+}
+
+const { dataToken = "27a8df7c-4186-4a12-8be3-2718c559d211", beamAnalyticsSrc = "https://beamanalytics.b-cdn.net/beam.min.js" } = Astro.props
+
+// <script src="https://beamanalytics.b-cdn.net/beam.min.js" data-token="27a8df7c-4186-4a12-8be3-2718c559d211" async></script>
+---
+
+<script src={beamAnalyticsSrc} data-token={dataToken} async></script>

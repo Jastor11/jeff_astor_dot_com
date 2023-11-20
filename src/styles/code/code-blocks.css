@@ -1,0 +1,166 @@
+.BlogPost {
+	-webkit-hyphens: none;
+	-moz-hyphens: none;
+	-ms-hyphens: none;
+	hyphens: none;
+}
+
+/* Size reset */
+.BlogPost pre, .BlogPost code {
+	font-size: 0.875rem;
+}
+
+/**
+  * Add back the container background-color, border-radius, padding, margin
+  * and overflow that we removed from <pre>.
+  */
+
+.BlogPost .code-block-pre-theme {
+	/* BACKGROUND */
+	background: #292b3a;
+	background: #ababb7;
+	padding: 0px;
+	margin: 0 auto 4rem auto;	
+	/* BORDER RADIUS */
+	border-radius: 0px;
+	border-top-right-radius: 4px;
+	border-bottom-left-radius: 4px;
+	clip-path: polygon(0 0, 100% 0%, 100% calc(100% - 30px), 0% 100%);
+	clip-path: polygon(100% 0, 100% calc(100% - 50px), 25% 100%, 0 100%, 0 0);
+	/* WIDTH */
+	width: unset;
+	/* TRANSITION */
+	transition: all 0.3s ease;
+}
+
+.BlogPost .code-block-pre-theme.expanded {
+	border-top-right-radius: 0px;
+	border-bottom-left-radius: 0px;
+}
+
+/* background layer */
+.BlogPost .code-block-pre-theme .inner {
+	/* BACKGROUND */
+	background: #292b3a;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	right: 0;
+	z-index: 0;	
+	padding: 0px;
+	padding-bottom: 40px;	
+	border-radius: 0px;
+	border-top-right-radius: 8px;
+	border-bottom-left-radius: 8px;	
+	/* CLIP PATH */
+	clip-path: polygon(calc(100% - 2px) 2px, calc(100% - 2px) calc(100% - 52px), calc(25% - 2px) calc(100% - 2px), 2px calc(100% - 2px), 2px 1px);
+	transition: all 0.3s ease;
+}
+
+.BlogPost .code-block-pre-theme.expanded .inner {
+
+	clip-path: polygon(100% 1px, calc(100% - 0px) calc(100% - 52px), calc(25% - 2px) calc(100% - 1px), 0px calc(100% - 1px), 0px 1px);
+	border-top-right-radius: 0px;
+	border-bottom-left-radius: 0px;	
+}
+
+/* treat pre blocks and inner as expanded under 900px */
+@media screen and (max-width: 900px) {
+	.BlogPost .code-block-pre-theme {
+		border-top-right-radius: 0px;
+		border-bottom-left-radius: 0px;
+	}
+
+	.BlogPost .code-block-pre-theme .inner {
+		clip-path: polygon(100% 1px, calc(100% - 0px) calc(100% - 52px), calc(25% - 2px) calc(100% - 1px), 0px calc(100% - 1px), 0px 1px);
+		border-top-right-radius: 0px;
+		border-bottom-left-radius: 0px;	
+	}
+}
+
+.BlogPost .accordion-trigger[data-state="open"] {
+	box-shadow: var(--elevation-3);
+}
+.BlogPost .accordion-trigger[data-state="open"] span,
+.BlogPost .accordion-trigger:hover span {
+	color: rgb(249, 249, 250) !important;
+}
+.BlogPost .accordion-content[data-state="open"] {
+	border-bottom: solid 1px rgb(30,41, 59);
+}
+
+
+.BlogPost .code-block-pre-theme code {
+	position: relative;
+	z-index: 1;
+}
+
+.BlogPost .code-block-pre-theme .line {
+	border-left-width: 4px;
+	border-left-style: solid;	
+	border-left-color: transparent;
+	padding-left: 1.2rem;
+	padding-right: 1rem;
+}
+
+.BlogPost .code-block-pre-theme .line.removed {
+	display: none;
+}
+
+.BlogPost .code-block-pre-theme .line.highlighted {
+	background-color: rgba(200, 200, 255, 0.1);
+	border-left-color: #60a5fa;
+}
+
+.BlogPost code[class*="language-"],
+.BlogPost pre[class*="language-"] {
+	color: #eff0f6;
+	background: none;
+	font-family: "Dank Mono", "IBM Plex Mono", Consolas, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+	text-align: left;
+	white-space: pre;
+	word-spacing: normal;
+	word-break: normal;
+	word-wrap: normal;
+	line-height: 1.5;
+
+	-moz-tab-size: 4;
+	-o-tab-size: 4;
+	tab-size: 4;
+
+	-webkit-hyphens: none;
+	-moz-hyphens: none;
+	-ms-hyphens: none;
+	hyphens: none;
+}
+
+@media print {
+
+	.BlogPost code[class*="language-"],
+	.BlogPost pre[class*="language-"] {
+		text-shadow: none;
+	}
+}
+
+
+:not(pre) > div > * > code,
+:not(.code-block-pre-theme) > div > * > code,
+:not(.code-content-wrapper) > * > code {
+	display: inline;
+	padding: 2px 3px 4px 2px;
+	border-radius: 3px;
+	white-space: pre-wrap;
+	color: var(--link-color);
+	font-weight: bold;
+	background: rgba(255, 255, 255, 0.2);
+	margin: 0 4px;
+	font-size: 18px;
+}
+
+.BlogPost blockquote code {
+	color: rgb(249, 249, 250);
+}
+.BlogPost blockquote a {
+	color: rgb(109, 99, 255) !important;
+	text-decoration: underline;
+}

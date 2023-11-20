@@ -1,0 +1,72 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+
+import UndrawSvg from "@/components/Media/UndrawSvg.astro"
+import InternalLink from "@/components/Common/InternalLink.astro"
+
+import * as dates from "@/lib/dates"
+import * as parseUtils from "@/utils/parse-utils"
+import * as links from "@/lib/links"
+
+import { cn } from "@/utils/styles"
+
+type Props = {
+  post?: BlogPostWithMeta
+  isPrevious?: boolean
+  className?: string
+  isDark?: boolean
+}
+
+const { isDark = true, ...props } = Astro.props
+
+const wrapperClassnames = cn([
+  "group",
+  "flex flex-col text-center flex-1",
+  "py-4 px-8 rounded-lg",
+  "duration-100",
+  "hover:no-underline",
+  isDark ? "bg-even-less-dark text-slate-400 hover:text-light elevate-3 border border-slate-800" : "bg-white",
+  props.isPrevious ? "items-left" : "items-right",
+  props.className,
+  //
+])
+
+const prevNextPostTextClassnames = cn([
+  "flex flex-nowrap items-center whitespace-nowrap text-2xl group mb-2",
+  props.isPrevious ? "self-end" : "self-start",
+])
+
+const postInfoClassnames = cn(["flex flex-col justify-between flex-1", "mt-10", ""])
+
+const hasPost = parseUtils.isDefined(props.post)
+// const hasCategory = parseUtils.isDefined(props.post) && parseUtils.isDefined(props.post?.data.category)
+const linkTo = parseUtils.isDefined(props.post) ? links.formatBlogLinkFromSlug(props.post.slug) : null
+---
+
+{!hasPost ? <div class="flex-1" /> : null}
+{
+  parseUtils.isDefined(props.post) && parseUtils.isDefined(props.post?.data.category) ? (
+    <InternalLink href={linkTo} class={wrapperClassnames}>
+      <span class={prevNextPostTextClassnames}>
+        {props.isPrevious ? (
+          <>
+            <span class="mx-1 group-hover:mx-4 duration-200">←</span> Previous Post
+          </>
+        ) : (
+          <>
+            Next Post <span class="mx-1 group-hover:mx-3 duration-200">→</span>
+          </>
+        )}
+      </span>
+
+      <UndrawSvg name={props.post.data.category} className="min-h-52 max-h-[20rem]" />
+
+      <div class={postInfoClassnames}>
+        <p class={cn("text-xl", "mt-auto", props.isPrevious ? "self-start" : "self-end")}>{props.post.data.title}</p>
+        <time class={cn("mt-4 text-xs font-bold", props.isPrevious ? "self-start" : "self-end")}>
+          {dates.prettyDate(props.post.data.date)}
+        </time>
+      </div>
+    </InternalLink>
+  ) : null
+}

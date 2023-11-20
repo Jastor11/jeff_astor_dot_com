@@ -1,0 +1,108 @@
+---
+import { Image } from "astro:assets"
+
+import BaseHead from "@/components/Head/BaseHead.astro"
+import Navbar from "@/components/Nav/Navbar.astro"
+import LandingFeed from "@/components/Landing/LandingFeed.astro"
+import LandingAuthor from "@/components/Landing/LandingAuthor.astro"
+import InternalLink from "@/components/Common/InternalLink.astro"
+
+import astorTeaching from "@/assets/images/astor_teaching.jpg"
+import { config } from "@/core/config"
+
+import { getPublishedBlogPosts } from "@/lib/blog-posts"
+
+import { cn } from "@/utils/styles"
+
+const posts = await getPublishedBlogPosts()
+
+// TODO: Get the most popular posts here also and allow for a toggle between most recent or most popular
+const formattedPosts = posts.slice(0, 14)
+
+const bodyClassnames = cn([
+  "min-h-screen",
+  "w-full",
+  "max-w-[100vw]",
+  "relative",
+  // "bg-dark",
+  "bg-less-dark",
+])
+
+const navbarClassnames = "sticky top-0 left-0 z-30"
+
+const mainClassnames = cn([
+  "relative",
+  "flex",
+  "w-full max-w-[100vw]",
+  // ""
+])
+
+const olderPostsLinkClassnames = cn(["inline-block", "text-white", "group", "hover:no-underline"])
+
+const imageColumnClassnames = cn([
+  "h-full min-h-[100vh]",
+  "flex-[2.5] min-w-[400px] flex-shrink-0",
+  "hidden ten:flex flex-col justify-between",
+  "sticky top-0 right-0",
+])
+
+const jumboImageClassnames = cn([
+  "jumbo-slanted-image",
+  "jumbo-image-slant",
+  "inline-block",
+  "flex-grow",
+  "flex-shrink-0",
+  "min-h-screen-55%",
+  "max-h-[567px]",
+  //
+])
+
+const { site_url, site_title } = config
+
+const image = "/images/astor_teaching_512_x_512.jpg"
+const logo = "/images/JeffAstor_Logo_512x512_rounded.png"
+
+const imageUrl = new URL(image, Astro.site)
+const logoUrl = new URL(logo, Astro.url)
+
+const jeffAstorLandingSeo = {
+  "@context": "http://schema.org",
+  "@type": "WebSite",
+  name: site_title,
+  url: site_url,
+  logo: logoUrl.toString(),
+  image: imageUrl.toString(),
+  // name: "JeffAstor.com",
+  // url: "https://www.jeffastor.com",
+  // logo: "https://jeffastor.com/images/JeffAstor_Logo_512x512_rounded.png",
+  // image: "https://jeffastor.com/images/JeffAstor_Logo_512x512_rounded.png",
+  // "alternateName": "High School CS teacher for almost a decade. Remote developer and all-purpose nerd. I write about learning, technology, and how technology learns."
+}
+const stringifiedSchema = JSON.stringify(jeffAstorLandingSeo)
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead description={config.site_description} />
+    <script type="application/ld+json" set:html={stringifiedSchema} />
+  </head>
+
+  <body class={bodyClassnames}>
+    <main class={mainClassnames}>
+      <div class="flex flex-col justify-start flex-[4] relative sm:px-10">
+        <Navbar isLanding className={navbarClassnames} />
+        <LandingFeed posts={formattedPosts} />
+        <div class="mt-8 pb-8">
+          <InternalLink class={olderPostsLinkClassnames} href="/blog">
+            See Older Posts <span class="group-hover:ml-1 duration-200 ease-in-out">→</span>
+          </InternalLink>
+        </div>
+      </div>
+      <div class={imageColumnClassnames}>
+        <Image src={astorTeaching} alt="Astor teaching" class={jumboImageClassnames} />
+        <LandingAuthor className="" />
+      </div>
+    </main>
+  </body>
+</html>

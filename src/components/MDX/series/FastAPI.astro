@@ -1,0 +1,30 @@
+---
+import PostSeriesList from "./PostSeriesList"
+
+import { getPublishedBlogPosts, getFastAPISeriesPosts } from "@/lib/blog-posts"
+
+const posts = await getPublishedBlogPosts()
+const globbedMd = await Astro.glob("../../../content/posts/**/*.{md,mdx}")
+const seriesPosts = getFastAPISeriesPosts(posts).reverse()
+
+const matchedSeriesPosts = seriesPosts.map((post) => {
+  const matched = globbedMd.find((md) => md?.frontmatter?.slug && md.frontmatter.slug === post.slug)
+  return {
+    ...post,
+    // frontmatter: matched?.frontmatter,
+    readingTime: matched?.frontmatter?.readingTime,
+    tableOfContents: matched?.frontmatter?.tableOfContents,
+    // ...matched,
+  } as const
+})
+
+type Props = {
+  upTo?: number
+}
+
+const { upTo } = Astro.props
+---
+
+<div class="my-10 max-w-[1100px] mx-auto">
+  <PostSeriesList series={matchedSeriesPosts} title="Up And Running With FastAPI" upTo={upTo} client:load />
+</div>

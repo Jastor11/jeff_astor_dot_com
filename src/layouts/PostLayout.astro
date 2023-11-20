@@ -1,0 +1,34 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+import AppLayout from "./AppLayout.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  title?: string
+  description?: string
+  className?: string
+  post: BlogPostWithMeta
+}
+
+const { title, description, className, post } = Astro.props
+
+const postTitle = post.data.title
+const metaTitle = title ?? postTitle
+
+const classes = cn(
+  "BlogPost prose",
+  // "pb-10",
+  className
+)
+---
+
+<AppLayout
+  title={metaTitle}
+  description={description}
+  className={classes}
+  excludeOpenGraph={true}
+  excludeTwitter={true}
+>
+  <slot name="head" slot="head" />
+  <slot />
+</AppLayout>

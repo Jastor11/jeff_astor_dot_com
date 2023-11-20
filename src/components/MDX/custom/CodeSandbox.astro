@@ -1,0 +1,12 @@
+---
+import Codesandbox from "./CodesandboxDisplay"
+
+type Props = {
+  codesandboxLink: string
+  codesandboxProps: any
+}
+
+const { codesandboxLink, codesandboxProps } = Astro.props
+---
+
+<Codesandbox codesandboxLink={codesandboxLink} codesandboxProps={codesandboxProps} client:load />

@@ -1,0 +1,24 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"figure"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  styles.maxWidthStyles,
+  styles.topBotMarginStyles,
+  "text-center mx-auto",
+  "[&_img]:border-2 [&_img]:border-[#ababb7] [&_img]:mx-auto",
+  className,
+  //
+])
+---
+
+<figure class={elementClassnames} {...props}>
+  <slot />
+</figure>

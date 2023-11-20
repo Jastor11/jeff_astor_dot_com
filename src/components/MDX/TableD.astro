@@ -1,0 +1,25 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import { cn } from "@/utils/styles"
+import { styles } from "./styles"
+
+type Props = HTMLAttributes<"td"> & {
+  className?: string
+}
+
+const { class: className, ...props } = Astro.props
+
+const elementClassnames = cn([
+  "p-0 overflow-hidden max-w-5",
+  "md:p-4",
+  "border border-neutral-300",
+  className,
+  //
+])
+---
+
+<td class={elementClassnames} {...props}>
+  <span class="flex items-center justify-center flex-row gap-2">
+    <slot />
+  </span>
+</td>

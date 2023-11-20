@@ -1,0 +1,57 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import InternalLink from "@/components/Common/InternalLink.astro"
+import * as links from "@/lib/links"
+import { cn } from "@/utils/styles"
+import { slugify } from "@/utils/slugify"
+
+type Props = Omit<HTMLAttributes<"a">, "href"> & {
+  tag: string
+  className?: string
+}
+
+const { tag, className, ...props } = Astro.props
+
+const linkToTagPage = links.formatTagLink(slugify(tag))
+
+// const tagClassnames = cn([
+//   "bg-accent",
+//   "py-3 pb-4 px-3",
+//   "rounded-lg",
+//   "mr-1 mb-1 mt-1",
+//   "cursor-pointer",
+//   "post-tag-slant",
+//   className,
+//   //
+// ])
+
+const tagClassnames = cn([
+  "PostTag",
+  "bg-accent",
+  "py-3 pb-4 px-3",
+  "rounded-lg",
+  "mr-1 mb-1 mt-1",
+  "cursor-pointer",
+  "post-tag-slant",
+  "hover:no-underline",
+  className,
+  //
+])
+
+// const tagTextClassnames = cn([
+//   "text-light",
+//   "text-xl",
+//   "font-light",
+//   //
+// ])
+
+const tagTextClassnames = cn([
+  "text-white",
+  "font-light",
+  //
+])
+---
+
+<InternalLink href={linkToTagPage} class={tagClassnames}>
+  <span class={tagTextClassnames}>{tag}</span>
+</InternalLink>

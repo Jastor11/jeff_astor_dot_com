@@ -1,0 +1,36 @@
+---
+import AppLayout from "@/layouts/AppLayout.astro"
+import StandardAppSeo from "@/components/Head/StandardAppSeo.astro"
+import SocialIcons from "@/components/Socials/SocialIcons.astro"
+import { cn } from "@/utils/styles"
+
+type Props = {
+  className?: string
+}
+
+const { className, ...props } = Astro.props
+
+const titleClassnames = [
+  //
+  "text-3xl tablet:text-7xl",
+  "text-light font-heading text-center",
+  "mt-16",
+  "uppercase",
+]
+
+const socialsGridClassnames = cn([
+  //
+  "grid grid-cols-2 gap-8 xs:grid-cols-4 sm:gap-12",
+  "my-12",
+  "place-center",
+])
+---
+
+<AppLayout title="Contact" isLanding={false}>
+  <StandardAppSeo slot="head" />
+  <div class="flex flex-col text-light w-full max-w-[100vw]">
+    <h2 class:list={titleClassnames}>connect with me</h2>
+
+    <SocialIcons size="lg" className={socialsGridClassnames} />
+  </div>
+</AppLayout>

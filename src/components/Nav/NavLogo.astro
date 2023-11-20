@@ -1,0 +1,31 @@
+---
+import type { HTMLAttributes } from "astro/types"
+import SiteIcon from "@/components/Common/SiteIcon.astro"
+import InternalLink from "@/components/Common/InternalLink.astro"
+import { cn } from "@/utils/styles"
+
+type Props = HTMLAttributes<"a">
+
+const { href, class: className, ...props } = Astro.props
+
+const linkClassnames = cn([
+  //
+  "flex gap-2.5",
+  "py-2 sm:py-0",
+  "mr-10 lg:mr-2",
+  "hover:no-underline",
+  className,
+])
+
+const logoTextClassnames = cn([
+  "text-light text-xl",
+  "font-heading font-light",
+  "relative",
+  //
+])
+---
+
+<InternalLink href={"/"} class={linkClassnames}>
+  <SiteIcon />
+  <span class={logoTextClassnames}>JeffAstor</span>
+</InternalLink>

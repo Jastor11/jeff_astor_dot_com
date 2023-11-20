@@ -1,0 +1,39 @@
+@supports (--css: variables) {
+	:root {
+		--light: 249, 249, 250;
+		--dark: 19, 17, 39;
+		--less-dark: 24, 22, 44;
+		--even-less-dark: 20, 27, 49;
+		--secondary: 86, 139, 123;
+		/* green */
+		--accent: 109, 99, 255;
+		/* purple */
+		--accent-light: 159, 149, 255;
+		--code-max-width: 900px;
+		/* light blue */
+		--neon-blue: 70, 180, 214;
+
+		--darker-neon-blue: 50, 160, 194;
+
+		--link-color: rgb(var(--neon-blue));
+
+		--border-color: #ababb7;
+		--see-through-border-color: rgba(171, 171, 183, 0.4);
+		--theme-purple: #6d63ff;
+		--theme-purple-light: #9f95ff;
+		
+	}
+
+	:root {
+		--elevation-1: 0px 1px 3px 0px rgba(0, 0, 0, 0.2), 0px 1px 1px 0px rgba(0, 0, 0, 0.14),
+			0px 2px 1px -1px rgba(0, 0, 0, 0.12);
+		--elevation-2: 0px 1px 5px 0px rgba(0, 0, 0, 0.2), 0px 2px 2px 0px rgba(0, 0, 0, 0.14),
+			0px 3px 1px -2px rgba(0, 0, 0, 0.12);
+		--elevation-3: 0px 1px 8px 0px rgba(0, 0, 0, 0.2), 0px 3px 4px 0px rgba(0, 0, 0, 0.14),
+			0px 3px 3px -2px rgba(0, 0, 0, 0.12);
+		--elevation-4: 0px 2px 4px -1px rgba(0, 0, 0, 0.2), 0px 4px 5px 0px rgba(0, 0, 0, 0.14),
+			0px 1px 10px 0px rgba(0, 0, 0, 0.12);
+		--elevation-5: 0px 3px 5px -1px rgba(0, 0, 0, 0.2), 0px 5px 8px 0px rgba(0, 0, 0, 0.14),
+			0px 1px 14px 0px rgba(0, 0, 0, 0.12);
+	}
+}

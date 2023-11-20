@@ -1,0 +1,53 @@
+---
+type Props = {
+  className?: string
+  strokeWidth?: number
+}
+
+const { className, ...props } = Astro.props
+const strokeWidth = props.strokeWidth ?? 4
+---
+
+<svg class={className} x="0px" y="0px" width="64px" height="64px" viewBox="0 0 64 64" {...props}>
+  <g stroke-width={strokeWidth} transform="translate(0, 0)" class="stroke-current">
+    <polyline
+      points="10 15 32 36 54 15"
+      fill={"none"}
+      stroke-linecap="square"
+      stroke-miterlimit="10"
+      stroke-width={strokeWidth}
+      stroke-linejoin="miter"
+      class="stroke-current"></polyline>
+    <line
+      x1="10"
+      y1="47"
+      x2="20"
+      y2="34"
+      fill={"none"}
+      stroke-linecap="square"
+      stroke-miterlimit="10"
+      stroke-width={strokeWidth}
+      stroke-linejoin="miter"
+      class="stroke-current"></line>
+
+    <line
+      x1="44"
+      y1="34"
+      x2="54"
+      y2="47"
+      fill={"none"}
+      stroke-linecap="square"
+      stroke-miterlimit="10"
+      stroke-width={strokeWidth}
+      stroke-linejoin="miter"
+      class="stroke-current"></line>
+    <path
+      d="M3,13V51a5,5,0,0,0,5,5H56a5,5,0,0,0,5-5V13a5,5,0,0,0-5-5H8A5,5,0,0,0,3,13Z"
+      fill={"none"}
+      stroke-linecap="square"
+      stroke-miterlimit="10"
+      stroke-width={strokeWidth}
+      stroke-linejoin="miter"
+      class="stroke-current"></path>
+  </g>
+</svg>

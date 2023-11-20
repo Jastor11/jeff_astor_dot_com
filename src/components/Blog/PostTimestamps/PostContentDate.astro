@@ -1,0 +1,32 @@
+---
+import type { BlogPostWithMeta } from "@/types/posts"
+import Timestamp from "./PostTimestamp.astro"
+import * as parseUtils from "@/utils/parse-utils"
+import { cn } from "@/utils/styles"
+
+type Datetime = Date | string | number
+type Category = string
+type Slug = string
+
+type Props = {
+  date: Datetime
+  dateModified?: Datetime
+}
+
+const props = Astro.props
+
+const wrapperClassnames = cn(["translate-y-[-6.72px]", "text-xs", "text-light"])
+---
+
+<div class={wrapperClassnames}>
+  <p class="font-semibold text-light">
+    <Timestamp ts={props.date} />
+    {
+      parseUtils.isDefined(props.dateModified) && props.dateModified !== props.date ? (
+        <span class="font-normal">
+          <span class="mx-4">UPDATED ON:</span> <Timestamp ts={props.dateModified} />
+        </span>
+      ) : null
+    }
+  </p>
+</div>

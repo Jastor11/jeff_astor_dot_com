@@ -1,0 +1,74 @@
+---
+import InternalLink from "@/components/Common/InternalLink.astro"
+import { cn } from "@/utils/styles"
+
+const links = [
+  { path: "/about", label: "about" },
+  { path: "/blog", label: "blog" },
+  { path: "/contact", label: "contact" },
+] as const
+
+type Props = {
+  className?: string
+}
+
+const { pathname } = Astro.url
+const { className } = Astro.props
+
+const navClassnames = cn([
+  "flex",
+  "lg:min-w-96",
+  "border-t border-t-light sm:border-t-0",
+  //
+])
+
+const wrapperClassnames = cn([
+  //
+  "flex flex-1 items-center justify-around gap-4",
+  "py-2 sm:py-0",
+  "w-full",
+  className,
+])
+
+const linkWrapperClassnames = cn([
+  "relative",
+  "text-xl font-light font-heading",
+  "px-2 py-1 sm:px-4 sm:py-2",
+  "rounded-xl",
+  "border border-transparent",
+  "duration-100 hover:bg-even-less-dark hover:border-slate-800",
+])
+
+const linkClassnames = cn([
+  //
+  "flex items-center justify-center",
+  "duration-100",
+  "font-heading",
+  "uppercase",
+  "hover:no-underline",
+])
+const inactiveLinkClassnames = cn([linkClassnames, "text-slate-400 hover:text-light"])
+const activeLinkClassnames = cn([linkClassnames, "text-light"])
+
+const isActive = (path: string) => path === pathname || path === pathname.replace(/\/$/, "") // || (path.includes("blog") && pathname.includes("blog"))
+const subPathIsActive = (path: string) => pathname.includes(path)
+---
+
+<nav class={navClassnames}>
+  <div class={wrapperClassnames}>
+    {
+      links.map((link) => {
+        const linkIsActive = isActive(link.path)
+
+        return (
+          <InternalLink
+            href={linkIsActive ? "#" : link.path}
+            className={linkIsActive || subPathIsActive(link.path) ? activeLinkClassnames : inactiveLinkClassnames}
+          >
+            <span class={linkWrapperClassnames}>{link.label}</span>
+          </InternalLink>
+        )
+      })
+    }
+  </div>
+</nav>
